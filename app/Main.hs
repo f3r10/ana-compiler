@@ -1,9 +1,9 @@
 module Main where
 
 import Data.Char (isDigit, isNumber)
-import System.Environment
 import Text.ParserCombinators.Parsec
 import Text.Printf
+import System.Environment (getArgs)
 
 data Sexp
   = Atom String
@@ -85,11 +85,9 @@ exprToInstrs expr si env =
           b_is = exprToInstrs body (si + 1) new_env
        in v_is ++ [store] ++ b_is
 
--- _ -> error "Parse failed at Expr -> String conversion "
-
 compile :: String -> String
 compile s =
-  let header = "section . text\nglobal our_code_starts_here\nour_code_starts_here:\n"
+  let header = "section .text\nglobal our_code_starts_here\nour_code_starts_here:\n"
       sexEp = stringToSexp s
       expr = sexpToExpr sexEp
       body = concatMap (printf " %s\n") $ exprToInstrs expr 1 []
@@ -98,15 +96,22 @@ compile s =
 
 main :: IO ()
 main =
-  let 
+  {- let 
    a = "(let (x 10) (let (y (inc x)) (let (z (inc y)) z)))"
    b = "(let (x (let (y 10) (inc y))) (let (z (inc x)) z))"
    in {- sexEp = stringToSexp a
       expr = sexpToExpr sexEp
       in
       print expr -}
-      putStrLn $ compile b
-
--- case a of
---   Left e -> print "error"
---   Right sexps -> print $ sexpToExpr sexps
+      putStrLn $ compile b -}
+  getArgs >>=
+    \args ->
+      case args of
+        [input] -> do
+          content <- readFile input 
+          let
+           result = compile content
+           in
+            putStrLn result
+        _ -> 
+          putStrLn "Usage: compile name.int"
