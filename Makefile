@@ -15,7 +15,8 @@ compile: app/Main.hs
 	cabal v2-install --install-method=copy --installdir=. --overwrite-policy=always
 
 %.run: %.o
-	clang -o $@ main.c $<
+	# clang -o $@ main.c $<
+	clang -o $@ -g -fsanitize=address main.c $<
 
 %.o: %.s
 	nasm -f elf64 -o $@ $<

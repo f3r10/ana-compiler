@@ -1,9 +1,12 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Main where
 
-import Data.Char (isDigit, isNumber)
+import Data.Char (isDigit, isNumber, isSymbol)
 import Text.ParserCombinators.Parsec
 import Text.Printf
 import System.Environment (getArgs)
+import Text.Parsec
+
 
 data Sexp
   = Atom String
@@ -13,8 +16,11 @@ data Sexp
 parseSexp :: Parser Sexp
 parseSexp = parseAtom <|> parseList
 
+operator :: (Stream s m Char) => ParsecT s u m Char
+operator = satisfy isSymbol
+
 parseAtom :: Parser Sexp
-parseAtom = ((many1 letter) <|> (many1 digit)) >>= return . Atom
+parseAtom = ((many1 letter) <|> (many1 digit) <|> (many1 operator)) >>= return . Atom
 
 parseList :: Parser Sexp
 parseList = between (char '(') (char ')') $ sepBy parseSexp (many1 space) >>= return . List
@@ -29,11 +35,19 @@ data Op
   | Dec
   deriving (Show)
 
+
+{- (*
+expr := <number>
+     | (let (<name> <expr>) <expr>) 
+     | (+ <expr> <expr>)
+     | <name>
+  *) -}
+
 data Expr
   = ENum Int
-  | EOp Op Expr
-  | ELet String Expr Expr
   | EId String
+  | ELet String Expr Expr
+  | EPlus Expr Expr
   deriving (Show)
 
 {- List [
@@ -46,8 +60,7 @@ sexpToExpr (Atom s) =
     else EId s
 sexpToExpr (List sexps) =
   case sexps of
-    [Atom "inc", arg] -> EOp Inc (sexpToExpr arg)
-    [Atom "dec", arg] -> EOp Dec (sexpToExpr arg)
+    [Atom "+", e1, e2] -> EPlus (sexpToExpr e1) (sexpToExpr e2)
     [Atom "let", List [Atom name, e1], e2] ->
       ELet name (sexpToExpr e1) (sexpToExpr e2)
     a -> error $ "Parse failed at Sexp->Expr conversion " ++ show a
@@ -55,6 +68,9 @@ sexpToExpr (List sexps) =
 -- ELet "x" (ENum 10) (EOp Inc (EId "x"))
 stackloc :: Int -> Int
 stackloc i = i * 8
+
+stackval :: Int -> String
+stackval i = "[rsp - " ++ show (stackloc i) ++ "]"
 
 type TEnv = [(String, Int)]
 
@@ -76,8 +92,15 @@ exprToInstrs expr si env =
         Nothing -> error "Unbound id"
         Just i -> ["mov rax, [rsp - " ++ show (stackloc i) ++ "]"]
     ENum n -> ["mov rax, " ++ show n]
-    EOp Inc e -> exprToInstrs e si env ++ ["add rax, 1"]
-    EOp Dec e -> exprToInstrs e si env ++ ["sub rax, 1"]
+    EPlus e1 e2 -> 
+      let
+        e1is = exprToInstrs e1 si env
+        e2is = exprToInstrs e2 (si + 1) env
+        in
+        e1is ++ ["mov " ++ stackval si ++ ", rax"] 
+        ++ e2is ++ [ "mov " ++ stackval (si + 1) ++ ", rax"] 
+        ++ ["mov rax, " ++ stackval si
+           , "add rax, " ++ stackval (si + 1)]
     ELet x value body ->
       let v_is = exprToInstrs value si env
           new_env = (x, si) : env
