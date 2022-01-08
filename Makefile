@@ -11,7 +11,7 @@
 # 	./compile $< > $@
 
 
-compile: app/Main.hs
+compile: src/*
 	cabal v2-install --install-method=copy --installdir=. --overwrite-policy=always
 
 %.run: %.o
