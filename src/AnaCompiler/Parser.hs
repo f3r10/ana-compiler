@@ -15,7 +15,7 @@ import AnaCompiler.Expr
 data Sexp
   = Atom String
   | List [Sexp]
-  deriving (Show)
+  deriving (Show, Eq)
 
 parseSexp :: Parser Sexp
 parseSexp = parseAtom <|> parseList
@@ -31,7 +31,7 @@ parseList = between (char '(') (char ')') $ sepBy parseSexp (many1 space) >>= re
 
 stringToSexp :: String -> Sexp
 stringToSexp s = case parse parseSexp "compiler" s of
-  Left err -> error $ "Parse failed at String->Sexp conversion: " ++ show err
+  Left err -> error $ "Parse failed at String-> Sexp conversion: " ++ show err ++ " expr: " ++ s
   Right sexp -> sexp
 
 sexpToExpr :: Sexp -> Expr

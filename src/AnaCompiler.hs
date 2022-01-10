@@ -24,5 +24,9 @@ main =
            result = compile sexEp
            in
             putStrLn result
-        _ -> 
-          putStrLn "Usage: compile [name].int"
+        _ ->
+          let
+            sexEp = stringToSexp "(let (a 10) a)"
+            result = compile sexEp
+            in
+            putStrLn result
