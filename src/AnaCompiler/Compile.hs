@@ -1,10 +1,8 @@
 module AnaCompiler.Compile (compile) where
 
-
+import AnaCompiler.Asm (Arg (Const, Reg, RegOffset), Instruction (..), Reg (RAX, RSP), toAsm)
 import AnaCompiler.Expr
 import AnaCompiler.Parser (Sexp, sexpToExpr)
-import AnaCompiler.Asm (Instruction (..), Arg (Reg, RegOffset, Const), Reg (RAX, RSP), toAsm)
-
 
 stackloc :: Int -> Arg
 stackloc i = RegOffset (-8 * i) RSP
@@ -30,14 +28,15 @@ exprToInstrs expr si env =
         Nothing -> error "Unbound id"
         Just i -> [IMov (Reg RAX) (stackloc i)]
     ENum n -> [IMov (Reg RAX) (Const n)]
-    EPlus e1 e2 -> 
-      let
-        e1is = exprToInstrs e1 si env
-        e2is = exprToInstrs e2 (si + 1) env
-        in
-        e1is ++ [IMov (stackloc si) (Reg RAX)]
-        ++ e2is ++ [IMov (stackloc $ si + 1) (Reg RAX)]
-        ++ [IMov (Reg RAX) (stackloc si), IAdd (Reg RAX) (stackloc $ si + 1)]
+    EPrim2 prim e1 e2 ->
+      let e1is = exprToInstrs e1 si env
+          e2is = exprToInstrs e2 (si + 1) env
+          op = e1is ++ [IMov (stackloc si) (Reg RAX)] ++ e2is ++ [IMov (stackloc $ si + 1) (Reg RAX)] ++ [IMov (Reg RAX) (stackloc si)]
+          final_op =
+            case prim of
+              Plus -> [IAdd (Reg RAX) (stackloc $ si + 1)]
+              Minus -> [ISub (Reg RAX) (stackloc $ si + 1)]
+       in op ++ final_op
     ELet x value body ->
       let v_is = exprToInstrs value si env
           new_env = (x, si) : env

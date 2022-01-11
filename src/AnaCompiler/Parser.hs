@@ -23,8 +23,11 @@ parseSexp = parseAtom <|> parseList
 operator :: (Stream s m Char) => ParsecT s u m Char
 operator = satisfy isSymbol
 
+minusOperator :: (Stream s m Char) => ParsecT s u m Char
+minusOperator = satisfy (== '-')
+
 parseAtom :: Parser Sexp
-parseAtom = ((many1 letter) <|> (many1 digit) <|> (many1 operator)) >>= return . Atom
+parseAtom = ((many1 letter) <|> (many1 digit) <|> (many1 operator) <|> (many1 minusOperator)) >>= return . Atom
 
 parseList :: Parser Sexp
 parseList = between (char '(') (char ')') $ sepBy parseSexp (many1 space) >>= return . List
@@ -41,7 +44,8 @@ sexpToExpr (Atom s) =
     else EId s
 sexpToExpr (List sexps) =
   case sexps of
-    [Atom "+", e1, e2] -> EPlus (sexpToExpr e1) (sexpToExpr e2)
+    [Atom "+", e1, e2] -> EPrim2 Plus (sexpToExpr e1) (sexpToExpr e2)
+    [Atom "-", e1, e2] -> EPrim2 Minus (sexpToExpr e1) (sexpToExpr e2)
     [Atom "let", List [Atom name, e1], e2] ->
       ELet name (sexpToExpr e1) (sexpToExpr e2)
     a -> error $ "Parse failed at Sexp->Expr conversion " ++ show a
