@@ -1,4 +1,4 @@
-module AnaCompiler.Expr (Expr(..), Prim2(..)) where
+module AnaCompiler.Expr (Expr(..), Prim2(..), Prim1(..)) where
 
 {- (*
 expr := <number>
@@ -6,6 +6,11 @@ expr := <number>
      | (+ <expr> <expr>)
      | <name>
   *) -}
+data Prim1
+  = Add1
+  | Sub1
+  deriving (Show)
+
 data Prim2 
   = Plus
   | Minus
@@ -15,5 +20,6 @@ data Expr
   = ENum Int
   | EId String
   | ELet String Expr Expr
+  | EPrim1 Prim1 Expr
   | EPrim2 Prim2 Expr Expr
   deriving (Show)

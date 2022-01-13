@@ -37,6 +37,11 @@ exprToInstrs expr si env =
               Plus -> [IAdd (Reg RAX) (stackloc $ si + 1)]
               Minus -> [ISub (Reg RAX) (stackloc $ si + 1)]
        in op ++ final_op
+    EPrim1 prim1 e1 -> 
+      let e1is = exprToInstrs e1 si env
+       in case prim1 of
+            Add1 -> e1is ++ [IAdd (Reg RAX) (Const 1)]
+            Sub1 -> e1is ++ [ISub (Reg RAX) (Const 1)]
     ELet x value body ->
       let v_is = exprToInstrs value si env
           new_env = (x, si) : env
