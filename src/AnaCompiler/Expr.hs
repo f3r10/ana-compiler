@@ -19,7 +19,7 @@ data Prim2
 data Expr
   = ENum Int
   | EId String
-  | ELet String Expr Expr
+  | ELet [(String, Expr)] Expr
   | EPrim1 Prim1 Expr
   | EPrim2 Prim2 Expr Expr
   deriving (Show)

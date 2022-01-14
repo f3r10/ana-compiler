@@ -20,12 +20,18 @@ find env x =
 
 type StackIndex = Int
 
+insertVal :: (String, Int) -> TEnv -> TEnv
+insertVal (x, si) env =
+  case find env x of
+    Nothing -> (x, si) : env
+    _ -> error "Compile error: Duplicate binding"
+
 exprToInstrs :: Expr -> StackIndex -> TEnv -> [Instruction]
 exprToInstrs expr si env =
   case expr of
     EId x ->
       case find env x of
-        Nothing -> error "Unbound id"
+        Nothing -> error $ "Compile error: Unbound variable identifier " ++ x
         Just i -> [IMov (Reg RAX) (stackloc i)]
     ENum n -> [IMov (Reg RAX) (Const n)]
     EPrim2 prim e1 e2 ->
@@ -42,12 +48,36 @@ exprToInstrs expr si env =
        in case prim1 of
             Add1 -> e1is ++ [IAdd (Reg RAX) (Const 1)]
             Sub1 -> e1is ++ [ISub (Reg RAX) (Const 1)]
-    ELet x value body ->
-      let v_is = exprToInstrs value si env
-          new_env = (x, si) : env
-          store = IMov (stackloc si) (Reg RAX)
-          b_is = exprToInstrs body (si + 1) new_env
-       in v_is ++ [store] ++ b_is
+    ELet list body -> 
+      let
+        (ins, si', localEnv) = compileLetExpr list [] si []
+        b_is = exprToInstrs body (si' + 1) localEnv
+      in ins ++ b_is
+      -- let 
+      --   lets = foldl (\acc (x, value) -> 
+      --     let
+      --       v_is = exprToInstrs value si env
+      --       store = IMov (stackloc si) (Reg RAX) 
+      --
+      --     ) [] list
+      -- in undefined
+
+compileLetExpr :: [(String, Expr)] -> [Instruction] -> StackIndex -> TEnv -> ([Instruction], StackIndex, TEnv)
+compileLetExpr list accInstruction si env =
+  case list of
+    [] -> (accInstruction, si, env)
+    [(x, value)] ->
+      let
+        v_is = exprToInstrs value si env
+        new_env = insertVal (x, si)  env
+        store = IMov (stackloc si) (Reg RAX)
+      in (accInstruction ++ v_is ++ [store], si + 1, new_env)
+    (x, value): rest -> 
+      let 
+        v_is = exprToInstrs value si env
+        new_env = insertVal (x, si) env
+        store = IMov (stackloc si) (Reg RAX)
+      in compileLetExpr rest ( accInstruction ++ (v_is ++ [store] )) (si + 1) new_env
 
 compile :: Sexp -> String
 compile sexEp =
