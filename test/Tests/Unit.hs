@@ -78,6 +78,12 @@ spec = do
     it "nested_add_2" $ do
       a <- test_run "(+ (- 10 5) 20)" "nested_add_2"
       shouldBe a "25"
+    it "nested_add_arith" $ do
+      a <- test_run "(- (* (- 54 3) 2) 102)" "nested_add_arith"
+      shouldBe a "0"
+    it "let_nested" $ do
+      a <- test_run "(let ((x (+ 5 (+ 10 20)))) (* x x))" "let_nested"
+      shouldBe a "1225"
     it "failLet" $
       let sexp = Parser.stringToSexp "(let ((x  1) (y 1) (x 10)) x)"
           result = compile sexp

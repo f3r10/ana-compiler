@@ -26,7 +26,7 @@ main =
             putStrLn result
         _ ->
           let
-            sexEp = stringToSexp "(let ((x 5)) (let ((x 67)) (sub1 x)))"
-            result = sexpToExpr sexEp
+            sexEp = stringToSexp "(- (* (- 54 3) 2) 102)"
+            result = compile sexEp
             in
-            putStrLn $ show result
+            putStrLn $ result

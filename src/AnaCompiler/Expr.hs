@@ -14,6 +14,7 @@ data Prim1
 data Prim2 
   = Plus
   | Minus
+  | Times
   deriving (Show)
 
 data Expr

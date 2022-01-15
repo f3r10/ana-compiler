@@ -14,6 +14,7 @@ data Instruction
   = IMov Arg Arg
   | IAdd Arg Arg
   | ISub Arg Arg
+  | IMul Arg Arg
   | IRet
 
 rToAsm :: Reg -> String
@@ -35,6 +36,7 @@ iToAsm ins =
     IMov dest value -> printf " mov %s, %s" (argToAsm dest) (argToAsm value)
     IAdd dest toAdd -> printf " add %s, %s" (argToAsm dest) (argToAsm toAdd) 
     ISub dest toAdd -> printf " sub %s, %s" (argToAsm dest) (argToAsm toAdd) 
+    IMul dest toAdd -> printf " imul %s, %s" (argToAsm dest) (argToAsm toAdd) 
     IRet -> "       ret"
 
 toAsm :: [Instruction] -> String

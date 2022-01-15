@@ -42,6 +42,7 @@ exprToInstrs expr si env =
             case prim of
               Plus -> [IAdd (Reg RAX) (stackloc $ si + 1)]
               Minus -> [ISub (Reg RAX) (stackloc $ si + 1)]
+              Times -> [IMul (Reg RAX) (stackloc $ si + 1)]
        in op ++ final_op
     EPrim1 prim1 e1 -> 
       let e1is = exprToInstrs e1 si env

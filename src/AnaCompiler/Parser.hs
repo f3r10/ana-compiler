@@ -26,6 +26,9 @@ operator = satisfy isSymbol
 minusOperator :: (Stream s m Char) => ParsecT s u m Char
 minusOperator = satisfy (== '-')
 
+timesOperator :: (Stream s m Char) => ParsecT s u m Char
+timesOperator = satisfy (== '*')
+
 -- this parsers has to go first since it has to detect an string ending up with a digit
 parseAtom2 :: Parser Sexp
 parseAtom2 = (string "add1" <|> string "sub1") >>= return . Atom
@@ -35,6 +38,7 @@ parseAtom = ( many1 letter
           <|> many1 digit 
           <|> many1 operator 
           <|> many1 minusOperator 
+          <|> many1 timesOperator 
             ) 
           >>= return . Atom
 
@@ -64,6 +68,7 @@ sexpToExpr (List sexps) =
   case sexps of
     [Atom "+", e1, e2] -> EPrim2 Plus (sexpToExpr e1) (sexpToExpr e2)
     [Atom "-", e1, e2] -> EPrim2 Minus (sexpToExpr e1) (sexpToExpr e2)
+    [Atom "*", e1, e2] -> EPrim2 Times (sexpToExpr e1) (sexpToExpr e2)
     [Atom "add1", e1] -> EPrim1 Add1 (sexpToExpr e1)
     [Atom "sub1", e1] -> EPrim1 Sub1 (sexpToExpr e1)
     [Atom "let", List ex1, simple_e_2] ->
