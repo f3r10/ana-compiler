@@ -48,6 +48,12 @@ spec = do
     it "forty_one" $ do
       a <- test_run "(sub1 42)" "forty_one"
       shouldBe a "41"
+    it "negative five" $ do
+      a <- test_run "(sub1 (sub1 -3))" "neg_five"
+      shouldBe a "-5"
+    it "rest negative numbers" $ do
+      a <- test_run "(- -1 -2)" "rest_neg_num"
+      shouldBe a "1"
     it "forty" $ do
       a <- test_run "(sub1 (sub1 42))" "forty"
       shouldBe a "40"
