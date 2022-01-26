@@ -3,7 +3,7 @@ module AnaCompiler.Compile (compile) where
 import AnaCompiler.Asm (Arg (Const, Reg, RegOffset), Instruction (..), Reg (RAX, RSP), toAsm)
 import AnaCompiler.Expr
 import AnaCompiler.Parser (Sexp, sexpToExpr)
-import Data.Bits (Bits(setBit, shiftL))
+import Data.Bits (Bits (setBit, shiftL))
 import Text.Printf (printf)
 
 stackloc :: Int -> Arg
@@ -32,28 +32,25 @@ insertVal (x, si) env =
     Nothing -> (x, si) : env
     _ -> error "Compile error: Duplicate binding"
 
-wellFormedELetExpr :: [(String, Expr)] -> [String] -> TEnv -> [String]
+{- wellFormedELetExpr :: [(String, Expr)] -> [String] -> TEnv -> [String]
 wellFormedELetExpr list accError env =
   case list of
     [] -> accError
     [(x, value)] ->
-      let
-        v_is = wellFormedE value env
-        new_env = case find env x of
-                    Nothing -> [""]
-                    _ -> [ printf "Multiple bindings for variable identifier %s" x]
-
-      in accError ++ v_is ++ new_env
-    (x, value): rest -> 
-      let 
-        v_is = wellFormedE value env
-        new_env = case find env x of
-                    Nothing -> [""] -- TODO is necessary to update the env?
-                    _ -> [printf "Multiple bindings for variable identifier %s" x]
-      in wellFormedELetExpr rest ( accError ++ (v_is ++ new_env )) env
+      let v_is = wellFormedE value env
+          new_env = case find env x of
+            Nothing -> [""]
+            _ -> [printf "Multiple bindings for variable identifier %s" x]
+       in accError ++ v_is ++ new_env
+    (x, value) : rest ->
+      let v_is = wellFormedE value env
+          new_env = case find env x of
+            Nothing -> [""] -- TODO is necessary to update the env?
+            _ -> [printf "Multiple bindings for variable identifier %s" x]
+       in wellFormedELetExpr rest (accError ++ (v_is ++ new_env)) env
 
 wellFormedE :: Expr -> TEnv -> [String]
-wellFormedE expr env = 
+wellFormedE expr env =
   case expr of
     ENum _ -> [""]
     EBool _ -> [""]
@@ -61,92 +58,112 @@ wellFormedE expr env =
       case find env x of
         Nothing -> [printf "variable identifier %s unbound" x]
         Just _ -> []
-    EPrim2 _ e1 e2 -> 
-      let
-       c1 = check e1
-       c2 = check e2
+    EPrim2 _ e1 e2 ->
+      let c1 = check e1
+          c2 = check e2
        in c1 ++ c2
     EPrim1 _ e1 -> check e1
-    ELet list body -> 
-      let
-       c1 = wellFormedELetExpr list [] env
-       c2 = check body
-       in c1 ++ c2 
-
+    ELet list body ->
+      let c1 = wellFormedELetExpr list [] env
+          c2 = check body
+       in c1 ++ c2
 
 check :: Expr -> [String]
-check expr = 
+check expr =
   case wellFormedE expr [("input", -1)] of
     [] -> []
-    errs -> error $ concat errs -- TODO concat but with an newline
+    errs -> error $ concat errs -- TODO concat but with an newline -}
+
+checkIfIsNumberOnRuntime :: [Instruction]
+checkIfIsNumberOnRuntime =
+  [IAnd (Reg RAX) (Const 1)]
+    ++ [ICmp (Reg RAX) (Const 1)]
+    ++ [IJne "internal_error_non_number"]
 
 exprToInstrs :: Expr -> StackIndex -> TEnv -> [Instruction]
 exprToInstrs expr si env =
-  case check expr of
+  {- case check expr of
     [] ->
-      case expr of
-        EId x ->
-          case find env x of
-            Nothing -> error $ "Compile error: Unbound variable identifier " ++ x
-            Just i -> [IMov (Reg RAX) (stackloc i)]
-        ENum n -> [IMov (Reg RAX) (Const (setBit (shiftL n 1) 0))]
-        EBool f -> 
-          if f
-             then [IMov (Reg RAX) (Const constTrue)]
-             else [IMov (Reg RAX) (Const constFalse)]
-        EPrim2 prim e1 e2 ->
-          let e1is = exprToInstrs e1 si env
-              e2is = exprToInstrs e2 (si + 1) env
-              op = e1is ++ [IMov (stackloc si) (Reg RAX)] ++ e2is ++ [IMov (stackloc $ si + 1) (Reg RAX)] ++ [IMov (Reg RAX) (stackloc si)]
-              final_op =
-                case prim of
-                  Plus -> [IAdd (Reg RAX) (stackloc $ si + 1)]
-                  Minus -> [ISub (Reg RAX) (stackloc $ si + 1)]
-                  Times -> [IMul (Reg RAX) (stackloc $ si + 1)]
-           in op ++ final_op
-        EPrim1 prim1 e1 -> 
-          let e1is = exprToInstrs e1 si env
-           in case prim1 of
-                Add1 -> e1is ++ [IAdd (Reg RAX) (Const 1)]
-                Sub1 -> e1is ++ [ISub (Reg RAX) (Const 1)]
-        ELet list body -> 
-          let
-            (ins, si', localEnv) = compileLetExpr list [] si []
-            b_is = exprToInstrs body (si' + 1) localEnv
-          in ins ++ b_is
-          -- let 
-          --   lets = foldl (\acc (x, value) -> 
-          --     let
-          --       v_is = exprToInstrs value si env
-          --       store = IMov (stackloc si) (Reg RAX) 
-          --
-          --     ) [] list
-          -- in undefined
-              -- in undefined
-    _ -> error "error" 
-
+    _ -> error "error"  -}
+  case expr of
+    EId x ->
+      case find env x of
+        Nothing -> error $ "Compile error: Unbound variable identifier " ++ x
+        Just i -> [IMov (Reg RAX) (stackloc i)]
+    ENum n -> [IMov (Reg RAX) (Const (n * 2 + 1 {- (Const (setBit (shiftL n 1) 0)) -}))]
+    EBool f ->
+      if f
+        then [IMov (Reg RAX) (Const constTrue)]
+        else [IMov (Reg RAX) (Const constFalse)]
+    EPrim2 prim e1 e2 ->
+      let e1is = exprToInstrs e1 si env
+          e2is = exprToInstrs e2 (si + 1) env
+          op =
+            e1is
+              ++ [IMov (stackloc si) (Reg RAX)]
+              ++ checkIfIsNumberOnRuntime
+              ++ e2is
+              ++ [IMov (stackloc $ si + 1) (Reg RAX)]
+              ++ checkIfIsNumberOnRuntime
+              ++ [IMov (Reg RAX) (stackloc si)]
+          final_op =
+            case prim of
+              Plus ->
+                IAdd (Reg RAX) (stackloc $ si + 1) : [ISub (Reg RAX) (Const 1)]
+              Minus -> ISub (Reg RAX) (stackloc $ si + 1) : [IAdd (Reg RAX) (Const 1)]
+              Times -> 
+                [IXor (Reg RAX) (Const 1)] ++
+                  [ISar (Reg RAX) (Const 1)] ++
+                    [IMov (stackloc si) (Reg RAX)] ++
+                      [IMul (Reg RAX) (stackloc $ si + 1)] ++
+                        [ISub (Reg RAX) (stackloc si)] ++
+                          [IXor (Reg RAX) (Const 1)]
+       in op ++ final_op
+    EPrim1 prim1 e1 ->
+      let 
+        e1is = exprToInstrs e1 si env
+        op = e1is 
+              ++ [IMov (stackloc si) (Reg RAX)] 
+              ++ checkIfIsNumberOnRuntime
+              ++ [IMov (Reg RAX) (stackloc si)]
+       in case prim1 of
+            Add1 -> op ++ [IAdd (Reg RAX) (Const (1 * 2 + 1))] ++ [ISub (Reg RAX) (Const 1)]
+            Sub1 -> op ++ [ISub (Reg RAX) (Const (1 * 2 + 1))] ++ [IAdd (Reg RAX) (Const 1)]
+    ELet list body ->
+      let (ins, si', localEnv) = compileLetExpr list [] si []
+          b_is = exprToInstrs body (si' + 1) localEnv
+       in ins ++ b_is
 
 compileLetExpr :: [(String, Expr)] -> [Instruction] -> StackIndex -> TEnv -> ([Instruction], StackIndex, TEnv)
 compileLetExpr list accInstruction si env =
   case list of
     [] -> (accInstruction, si, env)
     [(x, value)] ->
-      let
-        v_is = exprToInstrs value si env
-        new_env = insertVal (x, si)  env
-        store = IMov (stackloc si) (Reg RAX)
-      in (accInstruction ++ v_is ++ [store], si + 1, new_env)
-    (x, value): rest -> 
-      let 
-        v_is = exprToInstrs value si env
-        new_env = insertVal (x, si) env
-        store = IMov (stackloc si) (Reg RAX)
-      in compileLetExpr rest ( accInstruction ++ (v_is ++ [store] )) (si + 1) new_env
+      let v_is = exprToInstrs value si env
+          new_env = insertVal (x, si) env
+          store = IMov (stackloc si) (Reg RAX)
+       in (accInstruction ++ v_is ++ [store], si + 1, new_env)
+    (x, value) : rest ->
+      let v_is = exprToInstrs value si env
+          new_env = insertVal (x, si) env
+          store = IMov (stackloc si) (Reg RAX)
+       in compileLetExpr rest (accInstruction ++ (v_is ++ [store])) (si + 1) new_env
 
 compile :: Sexp -> String
 compile sexEp =
-  let header = "section .text\nextern error\nglobal our_code_starts_here\nour_code_starts_here:\n mov [rsp - 8], rdi"
+  let header =
+        "section .text\n\
+        \extern error\n\
+        \extern error_non_number\n\
+        \global our_code_starts_here\n\
+        \our_code_starts_here:\n\
+        \mov [rsp - 8], rdi"
+      footer =
+        "internal_error_non_number:\n\
+        \ mov rdi, rax\n\
+        \ push 0\n\
+        \ call error_non_number"
       expr = sexpToExpr sexEp
       compiled = exprToInstrs expr 2 [("input", 1)]
       body = toAsm $ compiled ++ [IRet]
-   in body `seq` header ++ body
+   in body `seq` header ++ body ++ footer

@@ -31,7 +31,7 @@ timesOperator = satisfy (== '*')
 
 -- this parsers has to go first since it has to detect an string ending up with a digit
 parseAtom2 :: Parser Sexp
-parseAtom2 = (string "add1" <|> string "sub1") >>= return . Atom
+parseAtom2 = (string "add1" <|> string "sub1" <|> string "true" <|> string "false") >>= return . Atom
 
 parseAtom :: Parser Sexp
 parseAtom =
@@ -58,16 +58,36 @@ stringToSexp s = case parse parseSexp "compiler" s of
 
 -- (let ((x 10) (y 7)) x) ->
 -- List [Atom "let",List [List [Atom "x",Atom "10"],List [Atom "y",Atom "7"]],Atom "x"]
+anaMax :: Integer
+anaMax = round (2.0 ** 62.0) - 1
+
+anaMin :: Integer
+anaMin = - round (2.0 ** 62.0)
+
+checkNumberLimits :: String -> Bool
+checkNumberLimits s =
+  let
+    num = read s
+  in anaMin < num && num < anaMax
+
+converToNumber :: String -> Expr
+converToNumber s =
+  if checkNumberLimits s
+     then ENum (read s)
+     else error $ "Compile error: Non-representable number " ++ s
+
 sexpToExpr :: Sexp -> Expr
 sexpToExpr (Atom s) =
   case s of
+    "true" -> EBool True
+    "false" -> EBool False
     '-' : rest ->
       if all isDigit rest
-        then ENum (read s)
-        else error $ "invalid number expression " ++ show s
+        then converToNumber s
+        else error $ "Compile error: Invalid number expression " ++ show s
     _ ->
       if all isDigit s
-        then ENum (read s)
+        then converToNumber s
         else EId s
 sexpToExpr (List sexps) =
   case sexps of
@@ -76,6 +96,8 @@ sexpToExpr (List sexps) =
     [Atom "*", e1, e2] -> EPrim2 Times (sexpToExpr e1) (sexpToExpr e2)
     [Atom "add1", e1] -> EPrim1 Add1 (sexpToExpr e1)
     [Atom "sub1", e1] -> EPrim1 Sub1 (sexpToExpr e1)
+    [Atom "true"] -> EBool True
+    [Atom "false"] -> EBool False
     [Atom "let", List ex1, simple_e_2] ->
       let la =
             foldl

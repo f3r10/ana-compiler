@@ -23,4 +23,5 @@ data Expr
   | ELet [(String, Expr)] Expr
   | EPrim1 Prim1 Expr
   | EPrim2 Prim2 Expr Expr
+  | EBool Bool
   deriving (Show)

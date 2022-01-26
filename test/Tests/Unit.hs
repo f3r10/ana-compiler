@@ -90,6 +90,13 @@ spec = do
     it "let_nested" $ do
       a <- test_run "(let ((x (+ 5 (+ 10 20)))) (* x x))" "let_nested"
       shouldBe a "1225"
+    it "overflow runtime" $ do
+      a <- test_run "(+ 4611686018427387803 10)" "overflow_runtime"
+      shouldBe a "overflow"
+    it "non-representable number" $
+      let sexp = Parser.stringToSexp "(+ 4611686018427387903 10)"
+          result = compile sexp
+       in evaluate result `shouldThrow` errorCall "Compile error: Non-representable number 4611686018427387903" 
     it "failLet" $
       let sexp = Parser.stringToSexp "(let ((x  1) (y 1) (x 10)) x)"
           result = compile sexp

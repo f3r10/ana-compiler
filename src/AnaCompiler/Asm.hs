@@ -12,9 +12,22 @@ data Arg
 
 data Instruction
   = IMov Arg Arg
+
   | IAdd Arg Arg
   | ISub Arg Arg
   | IMul Arg Arg
+
+  | IShr Arg Arg -- logical right shit
+  | ISar Arg Arg -- arithmetic right shift
+  | IShl Arg Arg -- left shift
+
+  | IAnd Arg Arg
+  | IOr Arg Arg
+  | IXor Arg Arg
+
+  | ICmp Arg Arg
+  | IJne String
+
   | IRet
 
 rToAsm :: Reg -> String
@@ -37,7 +50,15 @@ iToAsm ins =
     IAdd dest toAdd -> printf " add %s, %s" (argToAsm dest) (argToAsm toAdd) 
     ISub dest toAdd -> printf " sub %s, %s" (argToAsm dest) (argToAsm toAdd) 
     IMul dest toAdd -> printf " imul %s, %s" (argToAsm dest) (argToAsm toAdd) 
-    IRet -> "       ret"
+    IAnd dest mask -> printf " and %s, %s" (argToAsm dest) (argToAsm mask)
+    IOr dest mask -> printf " or %s, %s" (argToAsm dest) (argToAsm mask)
+    IXor dest mask -> printf " xor %s, %s" (argToAsm dest) (argToAsm mask)
+    ICmp dest toAdd -> printf " cmp %s, %s" (argToAsm dest) (argToAsm toAdd)
+    IShr dest toShift -> printf " shr %s, %s" (argToAsm dest) (argToAsm toShift)
+    ISar dest toShift -> printf " sar %s, %s" (argToAsm dest) (argToAsm toShift)
+    IShl dest toShift -> printf " shl %s, %s" (argToAsm dest) (argToAsm toShift)
+    IJne dest -> printf " jne %s" dest 
+    IRet -> "       ret\n"
 
 toAsm :: [Instruction] -> String
 toAsm = foldl (\s i -> printf "%s\n%s" s (iToAsm i)) ""

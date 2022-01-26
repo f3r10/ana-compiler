@@ -26,7 +26,7 @@ main =
             putStrLn result
         _ ->
           let
-            sexEp = stringToSexp "(- -1 -2)"
-            result = sexpToExpr sexEp
+            sexEp = stringToSexp "(+ true 1)"
+            result = compile sexEp
             in
-            putStrLn $ show result
+            putStrLn $ result
