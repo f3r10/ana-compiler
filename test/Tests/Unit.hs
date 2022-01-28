@@ -93,6 +93,24 @@ spec = do
     it "ifTest" $ do
       a <- test_run "(if true 5 6)" "ifTest"
       shouldBe a "5"
+    it "ifTestLet" $ do
+      a <- test_run "(let ((x 5)) (if (== x 7) 7 8))" "ifTestLet"
+      shouldBe a "8"
+    it "boolTest" $ do
+      a <- test_run "true" "boolTest"
+      shouldBe a "true"
+    it "isBoolTest" $ do
+      a <- test_run "(isBool false)" "isBoolTest"
+      shouldBe a "true"
+    it "isBoolTestF" $ do
+      a <- test_run "(isBool 5)" "isBoolTestF"
+      shouldBe a "false"
+    it "isNumTest" $ do
+      a <- test_run "(isNum 5)" "isNumTest"
+      shouldBe a "true"
+    it "complexIsExp" $ do
+      a <- test_run "(isNum (if (isBool (> 5 6)) 15 16))" "complexIsExp"
+      shouldBe a "true"
     it "overflow runtime" $ do
       a <- test_run "(+ 4611686018427387803 10)" "overflow_runtime"
       shouldBe a "overflow"

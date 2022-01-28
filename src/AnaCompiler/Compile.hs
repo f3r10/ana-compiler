@@ -4,8 +4,8 @@ import AnaCompiler.Asm (Arg (Const, Reg, RegOffset), Instruction (..), Reg (RAX,
 import AnaCompiler.Expr
 import AnaCompiler.Parser (Sexp, sexpToExpr)
 import Data.Bits (Bits (setBit, shiftL))
-import Text.Printf (printf)
 import Data.IORef
+import Text.Printf (printf)
 
 stackloc :: Int -> Arg
 stackloc i = RegOffset (-8 * i) RSP
@@ -93,17 +93,20 @@ type Counter = Int -> IO Int
 
 makeCounter :: IO Counter
 makeCounter = do
-    r <- newIORef 0
-    return (\i -> do modifyIORef r (+i)
-                     readIORef r)
+  r <- newIORef 0
+  return
+    ( \i -> do
+        modifyIORef r (+ i)
+        readIORef r
+    )
 
 makeLabel :: String -> Counter -> IO String
 makeLabel label counter = do
   c <- counter 1
-  return $ printf "%s_%s" label (show c)  
+  return $ printf "%s_%s" label (show c)
 
 exprToInstrs :: Expr -> StackIndex -> Counter -> TEnv -> IO [Instruction]
-exprToInstrs expr si counter env = 
+exprToInstrs expr si counter env =
   case expr of
     EId x ->
       case find env x of
@@ -114,110 +117,189 @@ exprToInstrs expr si counter env =
       if f
         then pure [IMov (Reg RAX) (Const constTrue)]
         else pure [IMov (Reg RAX) (Const constFalse)]
-    EPrim2 prim e1 e2 ->
-      let e1isIO = exprToInstrs e1 si counter env
-          e2isIO = exprToInstrs e2 (si + 1) counter env
-          opIO = do
-            e1is <- e1isIO
-            e2is <- e2isIO
-            return $ e1is
-              ++ [IMov (stackloc si) (Reg RAX)]
-              ++ checkIfIsNumberOnRuntime
-              ++ e2is
-              ++ [IMov (stackloc $ si + 1) (Reg RAX)]
-              ++ checkIfIsNumberOnRuntime
-              ++ [IMov (Reg RAX) (stackloc si)]
+    EPrim2 prim exp1 exp2 ->
+      let exp1InsIO = exprToInstrs exp1 si counter env
+          exp2InsIO = exprToInstrs exp2 (si + 1) counter env
+          opForNumIO = do
+            exp1Ins <- exp1InsIO
+            exp2Ins <- exp2InsIO
+            return $
+              exp1Ins
+                ++ [IMov (stackloc si) (Reg RAX)]
+                ++ checkIfIsNumberOnRuntime
+                ++ exp2Ins
+                ++ [IMov (stackloc $ si + 1) (Reg RAX)]
+                ++ checkIfIsNumberOnRuntime
+                ++ [IMov (Reg RAX) (stackloc si)]
           final_op =
             case prim of
-              Plus ->
-                IAdd (Reg RAX) (stackloc $ si + 1) : [ISub (Reg RAX) (Const 1)]
-              Minus -> ISub (Reg RAX) (stackloc $ si + 1) : [IAdd (Reg RAX) (Const 1)]
-              Times ->
-                [IXor (Reg RAX) (Const 1)]
-                  ++ [ISar (Reg RAX) (Const 1)]
-                  ++ [IMov (stackloc si) (Reg RAX)]
-                  ++ [IMul (Reg RAX) (stackloc $ si + 1)]
-                  ++ [ISub (Reg RAX) (stackloc si)]
-                  ++ [IXor (Reg RAX) (Const 1)]
-       in do
-         op <- opIO
-         return $ op ++ final_op 
-    EIf e1 e2 e3 -> 
-      let
-        e1isIO = exprToInstrs e1 si counter env
-        e2isIO = exprToInstrs e2 (si + 1) counter env -- TODO  this env keeps record of let variables. Is valid to repeat let variables inside blocks?
-        e3isIO = exprToInstrs e3 (si + 2) counter env
-        op = do
-          e1is <- e1isIO
-          e2is <- e2isIO
-          e3is <- e3isIO
-          elseBranchLabel <- makeLabel "else_branch" counter
-          endIfLabel <- makeLabel "end_of_if" counter
-          return $ e1is
-              ++ [ICmp (Reg RAX) (Const 0)]
-              ++ [IJe elseBranchLabel]
-              ++ e2is
-              ++ [IJmp endIfLabel]
-              ++ [ILabel elseBranchLabel] ++ e3is 
-              ++ [ILabel endIfLabel]
-        in op
-    EPrim1 prim1 e1 ->
+              Plus -> do
+                op <- opForNumIO
+                return $ op ++ IAdd (Reg RAX) (stackloc $ si + 1) : [ISub (Reg RAX) (Const 1)]
+              Minus -> do
+                op <- opForNumIO
+                return $ op ++ ISub (Reg RAX) (stackloc $ si + 1) : [IAdd (Reg RAX) (Const 1)]
+              Times -> do
+                op <- opForNumIO
+                return $
+                  op
+                    ++ [IXor (Reg RAX) (Const 1)]
+                    ++ [ISar (Reg RAX) (Const 1)]
+                    ++ [IMov (stackloc si) (Reg RAX)]
+                    ++ [IMul (Reg RAX) (stackloc $ si + 1)]
+                    ++ [ISub (Reg RAX) (stackloc si)]
+                    ++ [IXor (Reg RAX) (Const 1)]
+              Equal -> do
+                exp1Ins <- exp1InsIO
+                exp2Ins <- exp2InsIO
+                noEqualBranchLabel <- makeLabel "no_eq" counter
+                endCmpBranchLabel <- makeLabel "end_cmp" counter
+                return $
+                  exp1Ins
+                    ++ [IMov (stackloc si) (Reg RAX)]
+                    ++ exp2Ins
+                    ++ [IMov (stackloc $ si + 1) (Reg RAX)]
+                    ++ [ICmp (Reg RAX) (stackloc si)]
+                    ++ [IJne noEqualBranchLabel]
+                    ++ [IMov (Reg RAX) (Const constTrue)]
+                    ++ [IJmp endCmpBranchLabel]
+                    ++ [ILabel noEqualBranchLabel]
+                    ++ [IMov (Reg RAX) (Const constFalse)]
+                    ++ [ILabel endCmpBranchLabel]
+              Less -> do
+                op <- opForNumIO
+                lessBranchLabel <- makeLabel "less_than" counter
+                endCmpBranchLabel <- makeLabel "end_cmp" counter
+                return $
+                  op
+                    ++ [ICmp (Reg RAX) (stackloc $ si + 1)]
+                    ++ [IJl lessBranchLabel]
+                    ++ [IMov (Reg RAX) (Const constFalse)]
+                    ++ [IJmp endCmpBranchLabel]
+                    ++ [ILabel lessBranchLabel]
+                    ++ [IMov (Reg RAX) (Const constTrue)]
+                    ++ [ILabel endCmpBranchLabel]
+              Greater -> do
+                op <- opForNumIO
+                greaterBranchLabel <- makeLabel "greater_than" counter
+                endCmpBranchLabel <- makeLabel "end_cmp" counter
+                return $
+                  op
+                    ++ [ICmp (Reg RAX) (stackloc $ si + 1)]
+                    ++ [IJg greaterBranchLabel]
+                    ++ [IMov (Reg RAX) (Const constFalse)]
+                    ++ [IJmp endCmpBranchLabel]
+                    ++ [ILabel greaterBranchLabel]
+                    ++ [IMov (Reg RAX) (Const constTrue)]
+                    ++ [ILabel endCmpBranchLabel]
+       in final_op
+    EIf e1 e2 e3 ->
       let e1isIO = exprToInstrs e1 si counter env
-          opIO = do
+          e2isIO = exprToInstrs e2 (si + 1) counter env -- TODO  this env keeps record of let variables. Is valid to repeat let variables inside blocks?
+          e3isIO = exprToInstrs e3 (si + 2) counter env
+          op = do
             e1is <- e1isIO
-            return $ e1is
-              ++ [IMov (stackloc si) (Reg RAX)]
-              ++ checkIfIsNumberOnRuntime
-              ++ [IMov (Reg RAX) (stackloc si)]
-          finalOp = do
-            op <- opIO
-            case prim1 of
-              Add1 -> return $ op ++ [IAdd (Reg RAX) (Const (1 * 2 + 1))] ++ [ISub (Reg RAX) (Const 1)]
-              Sub1 -> return $ op ++ [ISub (Reg RAX) (Const (1 * 2 + 1))] ++ [IAdd (Reg RAX) (Const 1)]
-       in finalOp 
+            e2is <- e2isIO
+            e3is <- e3isIO
+            elseBranchLabel <- makeLabel "else_branch" counter
+            endIfLabel <- makeLabel "end_of_if" counter
+            return $
+              e1is
+                ++ [ICmp (Reg RAX) (Const 0)]
+                ++ [IJe elseBranchLabel]
+                ++ e2is
+                ++ [IJmp endIfLabel]
+                ++ [ILabel elseBranchLabel]
+                ++ e3is
+                ++ [ILabel endIfLabel]
+       in op
+    EPrim1 prim1 exp1 ->
+      let expInsIO = exprToInstrs exp1 si counter env
+          opForNumIO = do
+            expIns <- expInsIO
+            return $
+              expIns
+                ++ [IMov (stackloc si) (Reg RAX)]
+                ++ checkIfIsNumberOnRuntime
+                ++ [IMov (Reg RAX) (stackloc si)]
+          finalOp = case prim1 of
+              Add1 -> do
+                opForNum <- opForNumIO
+                return $ opForNum ++ [IAdd (Reg RAX) (Const (1 * 2 + 1))] ++ [ISub (Reg RAX) (Const 1)]
+              Sub1 -> do
+                opForNum <- opForNumIO
+                return $ opForNum ++ [ISub (Reg RAX) (Const (1 * 2 + 1))] ++ [IAdd (Reg RAX) (Const 1)]
+              IsNum -> do
+                expIns <- expInsIO
+                noNumBranchLabel <- makeLabel "non_num" counter
+                endCmpBranchLabel <- makeLabel "end_cmp" counter
+                return $ 
+                  expIns
+                  ++ [IAnd (Reg RAX) (Const 1)]
+                  ++ [ICmp (Reg RAX) (Const 1)]
+                  ++ [IJne noNumBranchLabel]
+                    ++ [IMov (Reg RAX) (Const constTrue)]
+                    ++ [IJmp endCmpBranchLabel]
+                    ++ [ILabel noNumBranchLabel]
+                    ++ [IMov (Reg RAX) (Const constFalse)]
+                    ++ [ILabel endCmpBranchLabel]
+              IsBool -> do
+                expIns <- expInsIO
+                noBoolBranchLabel <- makeLabel "non_bool" counter
+                endCmpBranchLabel <- makeLabel "end_cmp" counter
+                return $ 
+                  expIns
+                  ++ [IAnd (Reg RAX) (Const 1)]
+                  ++ [ICmp (Reg RAX) (Const 1)]
+                  ++ [IJe noBoolBranchLabel]
+                    ++ [IMov (Reg RAX) (Const constTrue)]
+                    ++ [IJmp endCmpBranchLabel]
+                    ++ [ILabel noBoolBranchLabel]
+                    ++ [IMov (Reg RAX) (Const constFalse)]
+                    ++ [ILabel endCmpBranchLabel]
+       in finalOp
     ELet list body -> do
       compileLetExprIO <- compileLetExpr list [] si [] counter
       let (ins, si', localEnv) = compileLetExprIO
           b_isIO = exprToInstrs body (si' + 1) counter localEnv
        in do
-         b_is <- b_isIO
-         return $ ins ++ b_is
+            b_is <- b_isIO
+            return $ ins ++ b_is
 
 compileLetExpr :: [(String, Expr)] -> [Instruction] -> StackIndex -> TEnv -> Counter -> IO ([Instruction], StackIndex, TEnv)
 compileLetExpr list accInstruction si env counter =
   case list of
     [] -> pure (accInstruction, si, env)
     [(x, value)] ->
-      let v_isIO = exprToInstrs value si counter env 
+      let v_isIO = exprToInstrs value si counter env
           new_env = insertVal (x, si) env
           store = IMov (stackloc si) (Reg RAX)
        in do
-         v_is <- v_isIO
-         return  (accInstruction ++ v_is ++ [store], si + 1, new_env)
+            v_is <- v_isIO
+            return (accInstruction ++ v_is ++ [store], si + 1, new_env)
     (x, value) : rest ->
       let v_isIO = exprToInstrs value si counter env
           new_env = insertVal (x, si) env
           store = IMov (stackloc si) (Reg RAX)
        in do
-         v_is <- v_isIO
-         compileLetExpr rest (accInstruction ++ (v_is ++ [store])) (si + 1) new_env counter
-
+            v_is <- v_isIO
+            compileLetExpr rest (accInstruction ++ (v_is ++ [store])) (si + 1) new_env counter
 
 compile :: Sexp -> IO String
 compile sexEp = do
   counter <- makeCounter
-  let 
-      header = "section .text\n\
-               \extern error\n\
-               \extern error_non_number\n\
-               \global our_code_starts_here\n\
-               \our_code_starts_here:\n\
-               \mov [rsp - 8], rdi"
+  let header =
+        "section .text\n\
+        \extern error\n\
+        \extern error_non_number\n\
+        \global our_code_starts_here\n\
+        \our_code_starts_here:\n\
+        \mov [rsp - 8], rdi"
       expr = sexpToExpr sexEp
       compiledIO = exprToInstrs expr 2 counter [("input", 1)]
       bodyIO = do
         compiled <- compiledIO
         return $ toAsm $ compiled ++ [IRet] ++ internalErrorNonNumber
    in do
-     body <- bodyIO
-     return $ body `seq` header ++ body 
+        body <- bodyIO
+        return $ body `seq` header ++ body

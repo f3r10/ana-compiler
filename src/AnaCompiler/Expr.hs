@@ -9,12 +9,17 @@ expr := <number>
 data Prim1
   = Add1
   | Sub1
+  | IsNum
+  | IsBool
   deriving (Show)
 
 data Prim2 
   = Plus
   | Minus
   | Times
+  | Less
+  | Greater
+  | Equal
   deriving (Show)
 
 data Expr

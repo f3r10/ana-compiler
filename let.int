@@ -1,1 +1,1 @@
-(if (if true false true) 5 false)
+(let ((i 5)) (if (== i 7) 7 8))

@@ -18,10 +18,13 @@ data Sexp
   deriving (Show, Eq)
 
 parseSexp :: Parser Sexp
-parseSexp = parseAtom2 <|> parseIntegers <|> parseAtom <|> parseList
+parseSexp = parseAtom2 <|> parseSimpleOp <|> parseIntegers <|> parseAtom <|> parseList
 
 parseIntegers :: Parser Sexp
 parseIntegers = (((:) <$> char '-' <*> (option "" $ many1 digit)) <|> many1 digit) >>= return . Atom
+
+parseSimpleOp :: Parser Sexp
+parseSimpleOp = ((:) <$> char 'i' <*> (option "" $ string "f" <|> ((:) <$> char 's' <*> (option "" $ string "Bool" <|> string "Num")))) >>= return . Atom
 
 operator :: (Stream s m Char) => ParsecT s u m Char
 operator = satisfy isSymbol
@@ -31,7 +34,14 @@ timesOperator = satisfy (== '*')
 
 -- this parsers has to go first since it has to detect an string ending up with a digit
 parseAtom2 :: Parser Sexp
-parseAtom2 = (string "add1" <|> string "sub1" <|> string "true" <|> string "false" <|> string "if") >>= return . Atom
+parseAtom2 =
+  ( string "add1"
+      <|> string "sub1"
+      <|> string "true"
+      <|> string "false"
+      <|> string "=="
+  )
+    >>= return . Atom
 
 parseAtom :: Parser Sexp
 parseAtom =
@@ -66,15 +76,14 @@ anaMin = - round (2.0 ** 62.0)
 
 checkNumberLimits :: String -> Bool
 checkNumberLimits s =
-  let
-    num = read s
-  in anaMin < num && num < anaMax
+  let num = read s
+   in anaMin < num && num < anaMax
 
 converToNumber :: String -> Expr
 converToNumber s =
   if checkNumberLimits s
-     then ENum (read s)
-     else error $ "Compile error: Non-representable number " ++ s
+    then ENum (read s)
+    else error $ "Compile error: Non-representable number " ++ s
 
 sexpToExpr :: Sexp -> Expr
 sexpToExpr (Atom s) =
@@ -94,8 +103,13 @@ sexpToExpr (List sexps) =
     [Atom "+", e1, e2] -> EPrim2 Plus (sexpToExpr e1) (sexpToExpr e2)
     [Atom "-", e1, e2] -> EPrim2 Minus (sexpToExpr e1) (sexpToExpr e2)
     [Atom "*", e1, e2] -> EPrim2 Times (sexpToExpr e1) (sexpToExpr e2)
+    [Atom "==", e1, e2] -> EPrim2 Equal (sexpToExpr e1) (sexpToExpr e2)
+    [Atom "<", e1, e2] -> EPrim2 Less (sexpToExpr e1) (sexpToExpr e2)
+    [Atom ">", e1, e2] -> EPrim2 Greater (sexpToExpr e1) (sexpToExpr e2)
     [Atom "add1", e1] -> EPrim1 Add1 (sexpToExpr e1)
     [Atom "sub1", e1] -> EPrim1 Sub1 (sexpToExpr e1)
+    [Atom "isNum", e1] -> EPrim1 IsNum (sexpToExpr e1)
+    [Atom "isBool", e1] -> EPrim1 IsBool (sexpToExpr e1)
     [Atom "true"] -> EBool True
     [Atom "false"] -> EBool False
     [Atom "if", e1, e2, e3] -> EIf (sexpToExpr e1) (sexpToExpr e2) (sexpToExpr e3)

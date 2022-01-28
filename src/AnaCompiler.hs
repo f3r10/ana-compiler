@@ -26,7 +26,8 @@ main =
             result >>= putStrLn 
         _ ->
           let
-            sexEp = stringToSexp "(if true 5 6)"
+            sexEp = stringToSexp "(isNum (if (isBool 5) 5 6))"
             result = compile sexEp
             in
             result >>= putStrLn
+              -- putStrLn $ show sexEp
