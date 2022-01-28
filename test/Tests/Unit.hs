@@ -23,7 +23,7 @@ test_run program name =
       name_s = printf "output/%s.s" name
       name_o = printf "output/%s.o" name
       name_run = printf "output/%s.run" name
-      writeResult = writeFile name_s result
+      writeResult = result >>= writeFile name_s 
       nasm_cmd = readProcess "nasm" ["-f elf64", "-o " ++ name_o, name_s] []
       clang_cmd = callCommand ("clang " ++ "-o " ++ name_run ++ " main.c " ++ name_o)
       result_o = readProcess name_run [] []
@@ -90,21 +90,24 @@ spec = do
     it "let_nested" $ do
       a <- test_run "(let ((x (+ 5 (+ 10 20)))) (* x x))" "let_nested"
       shouldBe a "1225"
+    it "ifTest" $ do
+      a <- test_run "(if true 5 6)" "ifTest"
+      shouldBe a "5"
     it "overflow runtime" $ do
       a <- test_run "(+ 4611686018427387803 10)" "overflow_runtime"
       shouldBe a "overflow"
     it "non-representable number" $
       let sexp = Parser.stringToSexp "(+ 4611686018427387903 10)"
           result = compile sexp
-       in evaluate result `shouldThrow` errorCall "Compile error: Non-representable number 4611686018427387903" 
+       in result `shouldThrow` errorCall "Compile error: Non-representable number 4611686018427387903" 
     it "failLet" $
       let sexp = Parser.stringToSexp "(let ((x  1) (y 1) (x 10)) x)"
           result = compile sexp
-       in evaluate result `shouldThrow` errorCall "Compile error: Duplicate binding"
+       in result `shouldThrow` errorCall "Compile error: Duplicate binding"
     it "failID" $
       let sexp = Parser.stringToSexp "x"
           result = compile sexp
-       in evaluate result `shouldThrow` errorCall "Compile error: Unbound variable identifier x"
+       in result `shouldThrow` errorCall "Compile error: Unbound variable identifier x"
     it "property" $
       property $
         \() -> () === ()

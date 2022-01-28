@@ -23,10 +23,10 @@ main =
            sexEp = stringToSexp content
            result = compile sexEp
            in
-            putStrLn result
+            result >>= putStrLn 
         _ ->
           let
-            sexEp = stringToSexp "(+ true 1)"
+            sexEp = stringToSexp "(if true 5 6)"
             result = compile sexEp
             in
-            putStrLn $ result
+            result >>= putStrLn

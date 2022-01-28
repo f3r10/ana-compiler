@@ -4,6 +4,7 @@ import Text.Printf (printf)
 data Reg
   = RAX {- the register where we place answers -}
   | RSP
+  | RDI
 
 data Arg
   = Const Int
@@ -25,16 +26,28 @@ data Instruction
   | IOr Arg Arg
   | IXor Arg Arg
 
-  | ICmp Arg Arg
-  | IJne String
-
+  | ILabel String
+  | IPush Arg
+  | IPop Arg
+  | ICall String
   | IRet
+
+  | ICmp Arg Arg
+  | IJne String -- if cmp equal do nothing else execute label
+  | IJe String
+  | IJmp String
+  | IJno String
+  | IJl String
+  | IJg String
+  | IJo String
+
 
 rToAsm :: Reg -> String
 rToAsm r =
   case r of
     RAX -> "rax"
     RSP -> "rsp"
+    RDI -> "rdi"
 
 argToAsm :: Arg -> String
 argToAsm arg =
@@ -53,12 +66,23 @@ iToAsm ins =
     IAnd dest mask -> printf " and %s, %s" (argToAsm dest) (argToAsm mask)
     IOr dest mask -> printf " or %s, %s" (argToAsm dest) (argToAsm mask)
     IXor dest mask -> printf " xor %s, %s" (argToAsm dest) (argToAsm mask)
-    ICmp dest toAdd -> printf " cmp %s, %s" (argToAsm dest) (argToAsm toAdd)
     IShr dest toShift -> printf " shr %s, %s" (argToAsm dest) (argToAsm toShift)
     ISar dest toShift -> printf " sar %s, %s" (argToAsm dest) (argToAsm toShift)
     IShl dest toShift -> printf " shl %s, %s" (argToAsm dest) (argToAsm toShift)
-    IJne dest -> printf " jne %s" dest 
     IRet -> "       ret\n"
+    ILabel name -> name ++ ":"
+    IPush arg -> printf " push %s" (argToAsm arg)
+    IPop arg -> undefined
+    ICall str -> printf " call %s" str
+    ICmp left right -> printf " cmp %s, %s" (argToAsm left) (argToAsm right)
+    IJne label -> printf " jne near %s" label 
+    IJe label -> printf " je near %s" label 
+    IJmp label -> printf " jmp near %s" label 
+    IJno label -> printf " jno near %s" label 
+    IJl label -> printf " jl near %s" label 
+    IJg label -> printf " jg near %s" label
+    IJo label -> printf " jo near %s" label
+
 
 toAsm :: [Instruction] -> String
 toAsm = foldl (\s i -> printf "%s\n%s" s (iToAsm i)) ""

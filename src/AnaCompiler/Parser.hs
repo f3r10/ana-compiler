@@ -31,7 +31,7 @@ timesOperator = satisfy (== '*')
 
 -- this parsers has to go first since it has to detect an string ending up with a digit
 parseAtom2 :: Parser Sexp
-parseAtom2 = (string "add1" <|> string "sub1" <|> string "true" <|> string "false") >>= return . Atom
+parseAtom2 = (string "add1" <|> string "sub1" <|> string "true" <|> string "false" <|> string "if") >>= return . Atom
 
 parseAtom :: Parser Sexp
 parseAtom =
@@ -98,6 +98,7 @@ sexpToExpr (List sexps) =
     [Atom "sub1", e1] -> EPrim1 Sub1 (sexpToExpr e1)
     [Atom "true"] -> EBool True
     [Atom "false"] -> EBool False
+    [Atom "if", e1, e2, e3] -> EIf (sexpToExpr e1) (sexpToExpr e2) (sexpToExpr e3)
     [Atom "let", List ex1, simple_e_2] ->
       let la =
             foldl

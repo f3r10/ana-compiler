@@ -21,6 +21,7 @@ data Expr
   = ENum Int
   | EId String
   | ELet [(String, Expr)] Expr
+  | EIf Expr Expr Expr
   | EPrim1 Prim1 Expr
   | EPrim2 Prim2 Expr Expr
   | EBool Bool

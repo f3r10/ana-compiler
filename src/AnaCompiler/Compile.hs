@@ -1,10 +1,11 @@
 module AnaCompiler.Compile (compile) where
 
-import AnaCompiler.Asm (Arg (Const, Reg, RegOffset), Instruction (..), Reg (RAX, RSP), toAsm)
+import AnaCompiler.Asm (Arg (Const, Reg, RegOffset), Instruction (..), Reg (RAX, RDI, RSP), toAsm)
 import AnaCompiler.Expr
 import AnaCompiler.Parser (Sexp, sexpToExpr)
 import Data.Bits (Bits (setBit, shiftL))
 import Text.Printf (printf)
+import Data.IORef
 
 stackloc :: Int -> Arg
 stackloc i = RegOffset (-8 * i) RSP
@@ -80,26 +81,46 @@ checkIfIsNumberOnRuntime =
     ++ [ICmp (Reg RAX) (Const 1)]
     ++ [IJne "internal_error_non_number"]
 
-exprToInstrs :: Expr -> StackIndex -> TEnv -> [Instruction]
-exprToInstrs expr si env =
-  {- case check expr of
-    [] ->
-    _ -> error "error"  -}
+internalErrorNonNumber :: [Instruction]
+internalErrorNonNumber =
+  [ ILabel "internal_error_non_number",
+    IMov (Reg RDI) (Reg RAX),
+    IPush (Const 0),
+    ICall "error_non_number"
+  ]
+
+type Counter = Int -> IO Int
+
+makeCounter :: IO Counter
+makeCounter = do
+    r <- newIORef 0
+    return (\i -> do modifyIORef r (+i)
+                     readIORef r)
+
+makeLabel :: String -> Counter -> IO String
+makeLabel label counter = do
+  c <- counter 1
+  return $ printf "%s_%s" label (show c)  
+
+exprToInstrs :: Expr -> StackIndex -> Counter -> TEnv -> IO [Instruction]
+exprToInstrs expr si counter env = 
   case expr of
     EId x ->
       case find env x of
         Nothing -> error $ "Compile error: Unbound variable identifier " ++ x
-        Just i -> [IMov (Reg RAX) (stackloc i)]
-    ENum n -> [IMov (Reg RAX) (Const (n * 2 + 1 {- (Const (setBit (shiftL n 1) 0)) -}))]
+        Just i -> pure [IMov (Reg RAX) (stackloc i)]
+    ENum n -> pure [IMov (Reg RAX) (Const (n * 2 + 1 {- (Const (setBit (shiftL n 1) 0)) -}))]
     EBool f ->
       if f
-        then [IMov (Reg RAX) (Const constTrue)]
-        else [IMov (Reg RAX) (Const constFalse)]
+        then pure [IMov (Reg RAX) (Const constTrue)]
+        else pure [IMov (Reg RAX) (Const constFalse)]
     EPrim2 prim e1 e2 ->
-      let e1is = exprToInstrs e1 si env
-          e2is = exprToInstrs e2 (si + 1) env
-          op =
-            e1is
+      let e1isIO = exprToInstrs e1 si counter env
+          e2isIO = exprToInstrs e2 (si + 1) counter env
+          opIO = do
+            e1is <- e1isIO
+            e2is <- e2isIO
+            return $ e1is
               ++ [IMov (stackloc si) (Reg RAX)]
               ++ checkIfIsNumberOnRuntime
               ++ e2is
@@ -111,59 +132,92 @@ exprToInstrs expr si env =
               Plus ->
                 IAdd (Reg RAX) (stackloc $ si + 1) : [ISub (Reg RAX) (Const 1)]
               Minus -> ISub (Reg RAX) (stackloc $ si + 1) : [IAdd (Reg RAX) (Const 1)]
-              Times -> 
-                [IXor (Reg RAX) (Const 1)] ++
-                  [ISar (Reg RAX) (Const 1)] ++
-                    [IMov (stackloc si) (Reg RAX)] ++
-                      [IMul (Reg RAX) (stackloc $ si + 1)] ++
-                        [ISub (Reg RAX) (stackloc si)] ++
-                          [IXor (Reg RAX) (Const 1)]
-       in op ++ final_op
+              Times ->
+                [IXor (Reg RAX) (Const 1)]
+                  ++ [ISar (Reg RAX) (Const 1)]
+                  ++ [IMov (stackloc si) (Reg RAX)]
+                  ++ [IMul (Reg RAX) (stackloc $ si + 1)]
+                  ++ [ISub (Reg RAX) (stackloc si)]
+                  ++ [IXor (Reg RAX) (Const 1)]
+       in do
+         op <- opIO
+         return $ op ++ final_op 
+    EIf e1 e2 e3 -> 
+      let
+        e1isIO = exprToInstrs e1 si counter env
+        e2isIO = exprToInstrs e2 (si + 1) counter env -- TODO  this env keeps record of let variables. Is valid to repeat let variables inside blocks?
+        e3isIO = exprToInstrs e3 (si + 2) counter env
+        op = do
+          e1is <- e1isIO
+          e2is <- e2isIO
+          e3is <- e3isIO
+          elseBranchLabel <- makeLabel "else_branch" counter
+          endIfLabel <- makeLabel "end_of_if" counter
+          return $ e1is
+              ++ [ICmp (Reg RAX) (Const 0)]
+              ++ [IJe elseBranchLabel]
+              ++ e2is
+              ++ [IJmp endIfLabel]
+              ++ [ILabel elseBranchLabel] ++ e3is 
+              ++ [ILabel endIfLabel]
+        in op
     EPrim1 prim1 e1 ->
-      let 
-        e1is = exprToInstrs e1 si env
-        op = e1is 
-              ++ [IMov (stackloc si) (Reg RAX)] 
+      let e1isIO = exprToInstrs e1 si counter env
+          opIO = do
+            e1is <- e1isIO
+            return $ e1is
+              ++ [IMov (stackloc si) (Reg RAX)]
               ++ checkIfIsNumberOnRuntime
               ++ [IMov (Reg RAX) (stackloc si)]
-       in case prim1 of
-            Add1 -> op ++ [IAdd (Reg RAX) (Const (1 * 2 + 1))] ++ [ISub (Reg RAX) (Const 1)]
-            Sub1 -> op ++ [ISub (Reg RAX) (Const (1 * 2 + 1))] ++ [IAdd (Reg RAX) (Const 1)]
-    ELet list body ->
-      let (ins, si', localEnv) = compileLetExpr list [] si []
-          b_is = exprToInstrs body (si' + 1) localEnv
-       in ins ++ b_is
+          finalOp = do
+            op <- opIO
+            case prim1 of
+              Add1 -> return $ op ++ [IAdd (Reg RAX) (Const (1 * 2 + 1))] ++ [ISub (Reg RAX) (Const 1)]
+              Sub1 -> return $ op ++ [ISub (Reg RAX) (Const (1 * 2 + 1))] ++ [IAdd (Reg RAX) (Const 1)]
+       in finalOp 
+    ELet list body -> do
+      compileLetExprIO <- compileLetExpr list [] si [] counter
+      let (ins, si', localEnv) = compileLetExprIO
+          b_isIO = exprToInstrs body (si' + 1) counter localEnv
+       in do
+         b_is <- b_isIO
+         return $ ins ++ b_is
 
-compileLetExpr :: [(String, Expr)] -> [Instruction] -> StackIndex -> TEnv -> ([Instruction], StackIndex, TEnv)
-compileLetExpr list accInstruction si env =
+compileLetExpr :: [(String, Expr)] -> [Instruction] -> StackIndex -> TEnv -> Counter -> IO ([Instruction], StackIndex, TEnv)
+compileLetExpr list accInstruction si env counter =
   case list of
-    [] -> (accInstruction, si, env)
+    [] -> pure (accInstruction, si, env)
     [(x, value)] ->
-      let v_is = exprToInstrs value si env
+      let v_isIO = exprToInstrs value si counter env 
           new_env = insertVal (x, si) env
           store = IMov (stackloc si) (Reg RAX)
-       in (accInstruction ++ v_is ++ [store], si + 1, new_env)
+       in do
+         v_is <- v_isIO
+         return  (accInstruction ++ v_is ++ [store], si + 1, new_env)
     (x, value) : rest ->
-      let v_is = exprToInstrs value si env
+      let v_isIO = exprToInstrs value si counter env
           new_env = insertVal (x, si) env
           store = IMov (stackloc si) (Reg RAX)
-       in compileLetExpr rest (accInstruction ++ (v_is ++ [store])) (si + 1) new_env
+       in do
+         v_is <- v_isIO
+         compileLetExpr rest (accInstruction ++ (v_is ++ [store])) (si + 1) new_env counter
 
-compile :: Sexp -> String
-compile sexEp =
-  let header =
-        "section .text\n\
-        \extern error\n\
-        \extern error_non_number\n\
-        \global our_code_starts_here\n\
-        \our_code_starts_here:\n\
-        \mov [rsp - 8], rdi"
-      footer =
-        "internal_error_non_number:\n\
-        \ mov rdi, rax\n\
-        \ push 0\n\
-        \ call error_non_number"
+
+compile :: Sexp -> IO String
+compile sexEp = do
+  counter <- makeCounter
+  let 
+      header = "section .text\n\
+               \extern error\n\
+               \extern error_non_number\n\
+               \global our_code_starts_here\n\
+               \our_code_starts_here:\n\
+               \mov [rsp - 8], rdi"
       expr = sexpToExpr sexEp
-      compiled = exprToInstrs expr 2 [("input", 1)]
-      body = toAsm $ compiled ++ [IRet]
-   in body `seq` header ++ body ++ footer
+      compiledIO = exprToInstrs expr 2 counter [("input", 1)]
+      bodyIO = do
+        compiled <- compiledIO
+        return $ toAsm $ compiled ++ [IRet] ++ internalErrorNonNumber
+   in do
+     body <- bodyIO
+     return $ body `seq` header ++ body 
