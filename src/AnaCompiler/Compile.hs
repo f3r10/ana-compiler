@@ -297,31 +297,21 @@ exprToInstrs expr si counter =
     ELet list body -> do
       -- ev <- get
       -- _ <- liftIO $ putStrLn $ show ev
-      compileLetExprIO <- liftIO $ compileLetExpr list [] si [] counter
-      let (ins, si', localEnv) = compileLetExprIO
-       in do
-            -- _ <- modify (++ localEnv)
-            b_is <- liftIO $ evalStateT (exprToInstrs body (si' + 1) counter) localEnv
-            return $ ins ++ b_is
+      ( (ins, si' ), localEnv ) <- liftIO $ runStateT (compileLetExpr list si counter) []
+      -- _ <- liftIO $ putStrLn $ show localEnv
+      b_is <- liftIO $ evalStateT (exprToInstrs body (si' + 1) counter) localEnv
+      return $ ins ++ b_is
 
-compileLetExpr :: [(String, Expr)] -> [Instruction] -> StackIndex -> TEnv -> Counter -> IO ([Instruction], StackIndex, TEnv)
-compileLetExpr list accInstruction si env counter =
-  case list of
-    [] -> pure (accInstruction, si, env)
-    [(x, value)] ->
-      let v_isIO = runStateT (exprToInstrs value si counter) env
-          new_env = insertVal (x, si) env
-          store = IMov (stackloc si) (Reg RAX)
-       in do
-            (v_is, in_env) <- v_isIO
-            return (accInstruction ++ v_is ++ [store], si + 1, new_env ++ in_env)
-    (x, value) : rest ->
-      let v_isIO = runStateT (exprToInstrs value si counter) env
-          new_env = insertVal (x, si) env
-          store = IMov (stackloc si) (Reg RAX)
-       in do
-            (v_is, in_env) <- v_isIO
-            compileLetExpr rest (accInstruction ++ (v_is ++ [store])) (si + 1) (new_env ++ in_env) counter
+compileLetExpr :: [(String, Expr)] -> StackIndex -> Counter -> Eval ([Instruction], StackIndex)
+compileLetExpr list si counter =
+  foldM (\(acc, si') (x, value) ->
+    let
+      vInstIO = runStateT (exprToInstrs value si' counter) []
+      store = IMov (stackloc si') (Reg RAX)
+      in do
+        (vIns, ev) <- liftIO vInstIO
+        state (\s -> ((acc ++ vIns ++ [store], si' + 1), ev ++ insertVal (x, si') s))
+        ) ([], si) list
 
 compile :: Sexp -> IO String
 compile sexEp = do
