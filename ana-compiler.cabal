@@ -37,6 +37,8 @@ library
     build-depends:
         base
         , parsec 
+        , validation
+        , mtl
     hs-source-dirs:   src
 
 executable compile

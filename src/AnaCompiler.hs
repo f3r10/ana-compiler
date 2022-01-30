@@ -26,7 +26,7 @@ main =
             result >>= putStrLn 
         _ ->
           let
-            sexEp = stringToSexp "(isNum (if (isBool 5) 5 6))"
+            sexEp = stringToSexp "(let ((x 5)) (let ((x 67)) (sub1 x)))"
             result = compile sexEp
             in
             result >>= putStrLn
