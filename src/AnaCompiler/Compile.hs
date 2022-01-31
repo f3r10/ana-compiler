@@ -1,6 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
-module AnaCompiler.Compile (compile) where
+module AnaCompiler.Compile (compile, AnaCompilerException(..)) where
 
 import AnaCompiler.Asm (Arg (Const, Reg, RegOffset), Instruction (..), Reg (RAX, RDI, RSP), toAsm)
 import AnaCompiler.Expr
@@ -10,6 +9,7 @@ import Data.IORef
 import Text.Printf (printf)
 import Data.Validation
 import Control.Monad.State.Lazy
+import Control.Exception (throw, Exception)
 
 stackloc :: Int -> Arg
 stackloc i = RegOffset (-8 * i) RSP
@@ -27,15 +27,6 @@ type Eval a = StateT TEnv IO a
 
 find :: String -> TEnv ->  Maybe Int
 find = lookup
-{- do
-  db <- get
-  return $ lookup x db -}
-  -- case db of
-  --   [] -> Nothing
-  --   (y, i) : rest ->
-  --     if y == x
-  --       then Just i
-  --       else find rest x
 
 type StackIndex = Int
 
@@ -43,43 +34,26 @@ insertVal :: (String, Int) -> TEnv -> TEnv
 insertVal (x, si) env =
   case find x env of
     Nothing -> (x, si) : env
-    _ -> error "Compile error: Duplicate binding"
-
-
--- data ExprValidated (a :: Expr) where
---   MkExprValidated :: ExprValidated a
+    _ -> env
 
 newtype ExprValidated = ExprValidated Expr
 
-newtype Error = Error [String]
+newtype Error = Error { errors :: [String] }
   deriving (Semigroup, Show)
 
-{- wellFormedELetExpr :: [(String, Expr)] -> Error -> TEnv -> Validation Error TEnv
-wellFormedELetExpr list accError env =
-  case list of
-    [] -> 
-      case accError of
-        Error [] -> Success env
-        errs -> Failure errs
-    [(x, value)] ->
-      let v_is = wellFormedE value env
-          new_env = case find x of
-            Nothing -> Success $ (x, 1) : env
-            _ -> Failure $ Error [printf "Multiple bindings for variable identifier %s" x]
-          valResult = v_is *> new_env
-          finalError = case valResult of
-            Failure errors -> Failure $ errors <> accError
-            Success _ -> new_env
-       in finalError
-    (x, value) : rest ->
-      let v_is = wellFormedE value env
-          new_env = case find env x of
-            Nothing -> Success $ (x, 1) : env -- TODO is necessary to update the env?
-            _ -> Failure $ Error [printf "Multiple bindings for variable identifier %s" x]
-          finalError = case v_is *> new_env of
-                         Success _ -> accError
-                         Failure errors -> accError <> errors
-       in wellFormedELetExpr rest finalError env
+wellFormedELetExpr :: [(String, Expr)] -> StackIndex -> Error -> TEnv -> (TEnv, Error, StackIndex)
+wellFormedELetExpr list si accError env =
+  foldl (\(accEnv, accErr, si' ) (x, value) -> 
+    let
+      vIns = wellFormedE value accEnv
+      (b, c, d) = case find x accEnv of
+            Nothing -> ((x, si') : accEnv, accErr, si' + 1 )
+            _ -> (accEnv, Error [printf "Multiple bindings for variable identifier %s" x] <> accErr, si')
+      fE = case vIns of
+             Failure errs -> c <> errs
+             Success _ -> c
+     in (b, fE, d)
+    ) (env, accError, si) list 
 
 wellFormedE :: Expr -> TEnv -> Validation Error ()
 wellFormedE expr env =
@@ -87,7 +61,7 @@ wellFormedE expr env =
     ENum _ -> Success ()
     EBool _ -> Success ()
     EId x ->
-      case find env x of
+      case find x env of
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" x]
         Just _ -> Success ()
     EPrim2 _ e1 e2 ->
@@ -96,17 +70,33 @@ wellFormedE expr env =
        in c1 *> c2
     EPrim1 _ e1 -> wellFormedE e1 env
     ELet list body ->
-      let c1 = wellFormedELetExpr list (Error []) env
-          c2 = wellFormedE body env
+      let 
+          (localEnv, localErrs, _) = wellFormedELetExpr list 0 (Error []) []
+          bodyC = wellFormedE body localEnv
+          c2 = case bodyC of
+                 Success _ -> 
+                   if null (errors localErrs)
+                      then Success ()
+                      else Failure localErrs
+                 Failure errs -> Failure $ localErrs <> errs
        in c2
     EIf exp1 exp2 exp3 -> 
       wellFormedE exp1 env *> wellFormedE exp2 env *> wellFormedE exp3 env
 
-check :: Expr -> ExprValidated
-check expr =
-  case wellFormedE expr [("input", -1)] of
-    Success _ -> ExprValidated expr
-    Failure errs -> error $ show errs -- TODO concat but with an newline -}
+newtype AnaCompilerException 
+  = AnaCompilerException [String]
+  deriving (Eq)
+
+instance Show AnaCompilerException where
+  show (AnaCompilerException errs) = unwords .words $ unlines errs
+
+instance Exception AnaCompilerException
+
+check :: Expr -> TEnv ->  IO ExprValidated
+check expr env =
+  case wellFormedE expr env of
+    Success _ -> pure $ ExprValidated expr
+    Failure errs -> throw $  AnaCompilerException $ errors errs 
 
 checkIfIsNumberOnRuntime :: [Instruction]
 checkIfIsNumberOnRuntime =
@@ -324,10 +314,9 @@ compile sexEp = do
         \our_code_starts_here:\n\
         \mov [rsp - 8], rdi"
       expr = sexpToExpr sexEp
-      -- ExprValidated validatedExpr = check expr
-      compiledIO = runStateT (exprToInstrs expr 2 counter) [("input", 1)]
       bodyIO = do
-        (compiled, _ ) <- compiledIO
+        (ExprValidated validatedExpr) <- check expr [("i", 1)]
+        compiled <- evalStateT (exprToInstrs validatedExpr 2 counter) [("i", 1)] --TODO fix variables should be supported
         return $ toAsm $ compiled ++ [IRet] ++ internalErrorNonNumber
    in do
         body <- bodyIO
