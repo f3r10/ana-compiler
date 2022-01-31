@@ -17,7 +17,8 @@ int64_t print(int64_t val) {
   // FILL IN YOUR CODE FROM HERE
   if ((val & 1) == 1) {
     if (BOA_MIN > val || val > BOA_MAX) {
-      printf("overflow");
+      fprintf(stderr, "overflow");
+      exit(1);
     } else {
       printf("%lld\n", val >> 1);
     }
@@ -26,18 +27,17 @@ int64_t print(int64_t val) {
   } else if (val == TRUE) {
     printf("true\n");
   } else {
-    printf("Unknown value: %lld\n", val);
+    fprintf(stderr, "Unknown value: %lld\n", val);
+    exit(1);
   }
 }
 
 void error(int64_t error_code) {
-  printf("Error: %lld\n", error_code);
-  exit(1);
+  fprintf(stderr, "Error: %lld\n", error_code);
 }
 
 void error_non_number(int64_t error_code) {
-  printf("Error: expected a number: %lld\n", error_code);
-  exit(1);
+  fprintf(stderr, "Error: expected a number");
 }
 
 int main(int argc, char** argv) {
@@ -56,17 +56,18 @@ int main(int argc, char** argv) {
       char *endptr;
       long v = strtoll(argv[1], &endptr, 0);
       if (*endptr != '\0') {
-        printf("input must be a boolean or a number\n");
+        fprintf(stderr, "input must be a boolean or a number\n");
         exit(1);
       }
       if (v < BOA_MIN) {
-        printf("input is not a representable number\n");
+        fprintf(stderr, "input is not a representable number\n");
         exit(1);
       } else if (v > BOA_MAX) {
-        printf("input is not a representable number\n");
+        fprintf(stderr, "input is not a representable number\n");
         exit(1);
       } else {
         input_val = (int64_t) v;
+        input_val = (input_val << 1) ^ 1;
       }
     }
   }
