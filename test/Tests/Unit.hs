@@ -121,40 +121,40 @@ spec = do
       a <- test_run "(+ 4611686018427387803 10)" "overflow_runtime" []
       shouldBe a "overflow"
     it "input1" $ do
-      a <- test_run "i" "input1" ["42"]
+      a <- test_run "input" "input1" ["42"]
       shouldBe a "42"
     it "input2" $ do
-      a <- test_run "i" "input2" ["true"]
+      a <- test_run "input" "input2" ["true"]
       shouldBe a "true"
     it "input3" $ do
-      a <- test_run "i" "input3" ["false"]
+      a <- test_run "input" "input3" ["false"]
       shouldBe a "false"
     it "input4" $ do
-      a <- test_run "i" "input4" []
+      a <- test_run "input" "input4" []
       shouldBe a "false"
     it "inputShadow" $ do
-      a <- test_run "(let ((i 10)) i)" "inputShadow" ["true"]
+      a <- test_run "(let ((input 10)) input)" "inputShadow" ["true"]
       shouldBe a "10"
     it "inputTest" $ do
-      a <- test_run "(add1 i)" "inputTest" ["5"]
+      a <- test_run "(add1 input)" "inputTest" ["5"]
       shouldBe a "6"
     it "fail types" $ do
       a <- test_run "(add1 true)" "failTypes" []
       shouldSatisfy a  (T.isInfixOf "expected a number")
     it "failInput" $ do
-      a <- test_run "i" "failInput" ["0r"]
+      a <- test_run "input" "failInput" ["0r"]
       shouldBe a "input must be a boolean or a number"
     it "inputerr_max" $ do
-      a <- test_run "i" "inputerr_max" ["4611686018427387904"]
+      a <- test_run "input" "inputerr_max" ["4611686018427387904"]
       shouldBe a "input is not a representable number"
     it "inputerr_min" $ do
-      a <- test_run "i" "inputerr_max" ["-4611686018427387905"]
+      a <- test_run "input" "inputerr_max" ["-4611686018427387905"]
       shouldBe a "input is not a representable number"
     it "inputerr_case" $ do
-      a <- test_run "i" "inputerr_case" ["False"]
+      a <- test_run "input" "inputerr_case" ["False"]
       shouldBe a "input must be a boolean or a number"
     it "failInputType" $ do
-      a <- test_run "(add1 i)" "failInputType" ["true"]
+      a <- test_run "(add1 input)" "failInputType" ["true"]
       shouldSatisfy a  (T.isInfixOf "expected a number")
     it "non-representable number" $
       let sexp = Parser.stringToSexp "(+ 4611686018427387903 10)"

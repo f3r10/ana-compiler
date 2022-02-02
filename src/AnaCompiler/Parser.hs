@@ -18,13 +18,13 @@ data Sexp
   deriving (Show, Eq)
 
 parseSexp :: Parser Sexp
-parseSexp = parseAtom2 <|> parseSimpleOp <|> parseIntegers <|> parseAtom <|> parseList
+parseSexp = parseAtom2 <|> parseIntegers <|> parseVariablesNames <|> parseAtom <|> parseList
 
 parseIntegers :: Parser Sexp
 parseIntegers = (((:) <$> char '-' <*> (option "" $ many1 digit)) <|> many1 digit) >>= return . Atom
 
-parseSimpleOp :: Parser Sexp
-parseSimpleOp = ((:) <$> char 'i' <*> (option "" $ string "f" <|> ((:) <$> char 's' <*> (option "" $ string "Bool" <|> string "Num")))) >>= return . Atom
+parseVariablesNames :: Parser Sexp
+parseVariablesNames = ((:) <$> oneOf (['a'..'z'] ++ ['A'..'Z']) <*> many (oneOf (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9']))) >>= return . Atom
 
 operator :: (Stream s m Char) => ParsecT s u m Char
 operator = satisfy isSymbol
@@ -45,8 +45,7 @@ parseAtom2 =
 
 parseAtom :: Parser Sexp
 parseAtom =
-  ( many1 letter
-      <|> many1 operator
+  ( many1 operator
       <|> many1 timesOperator
   )
     >>= return . Atom

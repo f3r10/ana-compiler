@@ -315,8 +315,8 @@ compile sexEp = do
         \mov [rsp - 8], rdi"
       expr = sexpToExpr sexEp
       bodyIO = do
-        (ExprValidated validatedExpr) <- check expr [("i", 1)]
-        compiled <- evalStateT (exprToInstrs validatedExpr 2 counter) [("i", 1)] --TODO fix variables should be supported
+        (ExprValidated validatedExpr) <- check expr [("input", 1)]
+        compiled <- evalStateT (exprToInstrs validatedExpr 2 counter) [("input", 1)]
         return $ toAsm $ compiled ++ [IRet] ++ internalErrorNonNumber
    in do
         body <- bodyIO
