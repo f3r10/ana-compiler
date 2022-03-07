@@ -3,18 +3,18 @@
 
 module Tests.Unit (main, spec) where
 
-import AnaCompiler.Compile (compile, AnaCompilerException (AnaCompilerException))
+import AnaCompiler.Compile (AnaCompilerException (AnaCompilerException), compile)
 import AnaCompiler.Parser (Sexp (Atom, List))
 import qualified AnaCompiler.Parser as Parser
 import qualified Data.Text as T
+import GHC.IO.Exception (ExitCode (ExitSuccess))
 import System.Directory (removeFile)
+import System.Exit (ExitCode (ExitFailure))
 import System.Process (callCommand, callProcess, createProcess, proc, readProcess, readProcessWithExitCode)
 import Test.Hspec
 import Test.QuickCheck
 import Test.QuickCheck.Exception (evaluate)
 import Text.Printf (printf)
-import GHC.IO.Exception (ExitCode(ExitSuccess))
-import System.Exit (ExitCode(ExitFailure))
 
 type Program = String
 
@@ -25,7 +25,7 @@ test_run program name args =
       name_s = printf "output/%s.s" name
       name_o = printf "output/%s.o" name
       name_run = printf "output/%s.run" name
-      writeResult = result >>= writeFile name_s 
+      writeResult = result >>= writeFile name_s
       nasm_cmd = readProcess "nasm" ["-f elf64", "-o " ++ name_o, name_s] []
       clang_cmd = callCommand ("clang " ++ "-o " ++ name_run ++ " main.c " ++ name_o)
       result_o = readProcessWithExitCode name_run args ""
@@ -34,10 +34,11 @@ test_run program name args =
         _ <- nasm_cmd
         _ <- clang_cmd
         (errorCode, a, b) <- result_o
-        _ <- putStrLn  b
-        let res = T.strip $ T.pack $ case errorCode of
-                                     ExitSuccess -> a
-                                     ExitFailure _ -> b
+        _ <- putStrLn b
+        let res = T.strip $
+              T.pack $ case errorCode of
+                ExitSuccess -> a
+                ExitFailure _ -> b
         _ <- removeFile name_s
         _ <- removeFile name_o
         _ <- removeFile name_run
@@ -51,6 +52,9 @@ main = hspec spec
 spec :: Spec
 spec = do
   describe "compiler" $ do
+    it "num_neg" $ do
+      a <- test_run "(+ -42 10)" "num_neg" []
+      shouldBe a "-32"
     it "forty_one" $ do
       a <- test_run "(sub1 42)" "forty_one" []
       shouldBe a "41"
@@ -138,9 +142,9 @@ spec = do
     it "inputTest" $ do
       a <- test_run "(add1 input)" "inputTest" ["5"]
       shouldBe a "6"
-    it "fail types" $ do
-      a <- test_run "(add1 true)" "failTypes" []
-      shouldSatisfy a  (T.isInfixOf "expected a number")
+    -- it "fail types" $ do
+    --   a <- test_run "(add1 true)" "failTypes" []
+    --   shouldSatisfy a  (T.isInfixOf "expected a number")
     it "failInput" $ do
       a <- test_run "input" "failInput" ["0r"]
       shouldBe a "input must be a boolean or a number"
@@ -155,11 +159,11 @@ spec = do
       shouldBe a "input must be a boolean or a number"
     it "failInputType" $ do
       a <- test_run "(add1 input)" "failInputType" ["true"]
-      shouldSatisfy a  (T.isInfixOf "expected a number")
+      shouldSatisfy a (T.isInfixOf "expected a number")
     it "non-representable number" $
       let sexp = Parser.stringToSexp "(+ 4611686018427387903 10)"
           result = compile sexp
-       in result `shouldThrow` errorCall  "Compile error: Non-representable number 4611686018427387903" 
+       in result `shouldThrow` errorCall "Compile error: Non-representable number 4611686018427387903"
     it "failLet" $
       let sexp = Parser.stringToSexp "(let ((x  1) (y 1) (x 10)) (x))"
           result = compile sexp
@@ -168,6 +172,22 @@ spec = do
       let sexp = Parser.stringToSexp "x"
           result = compile sexp
        in result `shouldThrow` (== AnaCompilerException ["variable identifier x unbound"])
+    it "add1_arguments" $
+      let sexp = Parser.stringToSexp "(add1 true)"
+          result = compile sexp
+       in result `shouldThrow` (== AnaCompilerException ["Type mismatch: op must take a number as an argument"])
+    it "plus_arguments" $
+      let sexp = Parser.stringToSexp "(+ 1 true)"
+          result = compile sexp
+       in result `shouldThrow` (== AnaCompilerException ["Type mismatch: op must take a number as an argument"])
+    it "if_condition" $
+      let sexp = Parser.stringToSexp "(if 1 2 (+ 3 2))"
+          result = compile sexp
+       in result `shouldThrow` (== AnaCompilerException ["Type mismatch: if expects a boolean in conditional position"])
+    it "if_branches" $
+      let sexp = Parser.stringToSexp "(if true false (+ 3 2))"
+          result = compile sexp
+       in result `shouldThrow` (== AnaCompilerException ["Type mismatch: if branches must agree on type"])
     it "property" $
       property $
         \() -> () === ()

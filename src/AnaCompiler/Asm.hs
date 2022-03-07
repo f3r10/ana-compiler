@@ -13,17 +13,20 @@ data Reg
   = RAX {- the register where we place answers -}
   | RSP -- the stack pointer
   | RDI -- the first function argument goes here
+  deriving (Show)
 
 data Size
   = DWORD_PTR
   | WORD_PTR
   | BYTE_PTR
+  deriving (Show)
 
 data Arg
   = Const Int
   | Reg Reg
   | RegOffset Int Reg
   | Size Size Arg
+  deriving (Show)
 
 data Instruction
   = IMov Arg Arg
@@ -49,6 +52,7 @@ data Instruction
   | IJl String
   | IJg String
   | IJo String
+  deriving (Show)
 
 rToAsm :: Reg -> String
 rToAsm r =
