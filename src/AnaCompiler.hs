@@ -26,8 +26,9 @@ main =
             result >>= putStrLn 
         _ ->
           let
-            sexEp = stringToSexp "(let ((x 5)) (let ((x 67)) (sub1 x)))"
+            sexEp = stringToSexp "(let ((x 5)) (add1 x))" --"(let ((x 5) (y 6)) ((add1 y) (add1 x) (+ x y)))"
+            sexpToExprRes = sexpToExpr sexEp
             result = compile sexEp
             in
-            result >>= putStrLn
-              -- putStrLn $ show sexEp
+            -- result >>= putStrLn
+              putStrLn $ show sexEp

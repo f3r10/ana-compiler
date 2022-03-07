@@ -41,6 +41,22 @@ newtype ExprValidated = ExprValidated Expr
 newtype Error = Error { errors :: [String] }
   deriving (Semigroup, Show)
 
+
+wellFormedELetBody :: [Expr]  -> TEnv  -> Validation Error ()
+wellFormedELetBody exprs localEnv =
+  let
+    localErrs = foldl (\a b -> 
+      let 
+        vIns = wellFormedE b localEnv
+        fE = case vIns of
+               Failure errs -> a <> errs
+               Success _ -> a
+      in fE
+      ) (Error []) exprs
+  in if null (errors localErrs)
+        then Success ()
+        else Failure localErrs
+
 wellFormedELetExpr :: [(String, Expr)] -> StackIndex -> Error -> TEnv -> (TEnv, Error, StackIndex)
 wellFormedELetExpr list si accError env =
   foldl (\(accEnv, accErr, si' ) (x, value) -> 
@@ -70,9 +86,9 @@ wellFormedE expr env =
        in c1 *> c2
     EPrim1 _ e1 -> wellFormedE e1 env
     ELet list body ->
-      let 
+      let
           (localEnv, localErrs, _) = wellFormedELetExpr list 0 (Error []) []
-          bodyC = wellFormedE body localEnv
+          bodyC = wellFormedELetBody body localEnv
           c2 = case bodyC of
                  Success _ -> 
                    if null (errors localErrs)
@@ -284,13 +300,20 @@ exprToInstrs expr si counter =
                     ++ [IMov (Reg RAX) (Const constFalse)]
                     ++ [ILabel endCmpBranchLabel]
        in finalOp
-    ELet list body -> do
+    ELet listBindings listExpr -> do
       -- ev <- get
       -- _ <- liftIO $ putStrLn $ show ev
-      ( (ins, si' ), localEnv ) <- liftIO $ runStateT (compileLetExpr list si counter) []
+      ( (ins, si' ), localEnv ) <- liftIO $ runStateT (compileLetExpr listBindings si counter) []
       -- _ <- liftIO $ putStrLn $ show localEnv
-      b_is <- liftIO $ evalStateT (exprToInstrs body (si' + 1) counter) localEnv
-      return $ ins ++ b_is
+      b_is <- liftIO $  compileLetBody listExpr (si' + 1) counter localEnv  
+      return $ ins ++ concat (reverse b_is)
+
+compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv  -> IO [[Instruction]]
+compileLetBody exprs si counter localEnv =
+  foldl (\a b -> do
+    c <- a
+    d <- evalStateT (exprToInstrs b si counter) localEnv
+    return $ d : c) (pure []) exprs
 
 compileLetExpr :: [(String, Expr)] -> StackIndex -> Counter -> Eval ([Instruction], StackIndex)
 compileLetExpr list si counter =

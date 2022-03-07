@@ -84,8 +84,8 @@ converToNumber s =
     then ENum (read s)
     else error $ "Compile error: Non-representable number " ++ s
 
-sexpToExpr :: Sexp -> Expr
-sexpToExpr (Atom s) =
+stringToExpr :: String -> Expr
+stringToExpr s =
   case s of
     "true" -> EBool True
     "false" -> EBool False
@@ -97,6 +97,10 @@ sexpToExpr (Atom s) =
       if all isDigit s
         then converToNumber s
         else EId s
+
+sexpToExpr :: Sexp -> Expr
+sexpToExpr (Atom s) = stringToExpr s
+
 sexpToExpr (List sexps) =
   case sexps of
     [Atom "+", e1, e2] -> EPrim2 Plus (sexpToExpr e1) (sexpToExpr e2)
@@ -112,8 +116,9 @@ sexpToExpr (List sexps) =
     [Atom "true"] -> EBool True
     [Atom "false"] -> EBool False
     [Atom "if", e1, e2, e3] -> EIf (sexpToExpr e1) (sexpToExpr e2) (sexpToExpr e3)
-    [Atom "let", List ex1, simple_e_2] ->
-      let la =
+    [Atom "let", List ex1, List simple_e_2] ->
+      let 
+        la =
             foldl
               ( \a b ->
                   case b of
@@ -122,5 +127,13 @@ sexpToExpr (List sexps) =
               )
               []
               ex1
-       in ELet (reverse la) (sexpToExpr simple_e_2)
+        l2 = 
+            foldl
+              ( \a b ->
+                case b of
+                  simpleAtom@(Atom _) -> sexpToExpr simpleAtom : a
+                  bExp@(List _) -> sexpToExpr bExp : a
+                  {- _ -> error $ "invalid let rec body expression " ++ show b -} ) [] simple_e_2
+       in ELet (reverse la) (reverse l2)
+    -- [Atom s] -> stringToExpr s
     a -> error $ "Parse failed at Sexp->Expr conversion " ++ show a
