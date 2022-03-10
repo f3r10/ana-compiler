@@ -109,6 +109,12 @@ spec = do
     it "setTest" $ do
       a <- test_run "(let ((x 1)) (set x 2) x)" "setTest" []
       shouldBe a "2"
+    it "whileTest" $ do
+      a <- test_run "(let ((c 10) (x 0)) (while (> c x) (set x (+ x 1))) x)" "whileTest" []
+      shouldBe a "10"
+    it "whileTest_2" $ do
+      a <- test_run "(let ((c 10) (x 0) (y (while (> c x) (set x (+ x 1)) 5))) y)" "whileTest_2" []
+      shouldBe a "false"
     it "boolTest" $ do
       a <- test_run "true" "boolTest" []
       shouldBe a "true"

@@ -26,7 +26,7 @@ main =
             result >>= putStrLn 
         _ ->
           let
-            sexEp = stringToSexp "(let ((x (let ((x 5)) (sub1 x)))) (let ((y (sub1 x))) y))"
+            sexEp = stringToSexp "(let ((x 5) (y 6)) (add1 y) (add1 x) (+ x y))"
             sexpToExprRes = sexpToExpr sexEp
             typ = calcTyp sexpToExprRes []
             checkRes = check sexpToExprRes []

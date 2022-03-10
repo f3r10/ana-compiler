@@ -26,6 +26,7 @@ data Expr
   = ENum Int
   | EId String
   | ELet [(String, Expr)] [Expr]
+  | EWhile Expr [Expr]
   | ESet String Expr
   | EIf Expr Expr Expr
   | EPrim1 Prim1 Expr

@@ -117,6 +117,15 @@ sexpToExpr (List sexps) =
     [Atom "false"] -> EBool False
     [Atom "if", e1, e2, e3] -> EIf (sexpToExpr e1) (sexpToExpr e2) (sexpToExpr e3)
     [Atom "set", Atom val, e1 ] -> ESet val (sexpToExpr e1)
+    Atom "while" : condExp : listExpr -> 
+      let
+        body = 
+            foldl
+              ( \a b ->
+                case b of
+                  simpleAtom@(Atom _) -> sexpToExpr simpleAtom : a
+                  bExp@(List _) -> sexpToExpr bExp : a) [] listExpr
+       in EWhile (sexpToExpr condExp) (reverse body)
     [Atom "let", List ex1, simpleLetBody] ->
       let 
         la =

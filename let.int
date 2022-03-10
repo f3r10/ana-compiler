@@ -1,1 +1,1 @@
-(let ((x (let ((x 5)) (sub1 x)))) (let ((y (sub1 x))) y))
+(let ((c 10) (x 0) (y (while (> c x) (set x (+ x 1)) 5))) y)

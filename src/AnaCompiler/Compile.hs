@@ -45,7 +45,7 @@ insertVal (x, si) env =
     Nothing -> (x, si) : env
     _ -> env
 
-newtype ExprValidated 
+newtype ExprValidated
   = ExprValidated Expr
   deriving (Show)
 
@@ -78,6 +78,11 @@ calcTyp expr typEnv =
         Sub1 -> checkTNumType e typEnv
         IsNum -> pure $ TypValidated TBool
         IsBool -> pure $ TypValidated TBool
+    EWhile cond _ -> do
+      TypValidated tpy <- calcTyp cond typEnv
+      case tpy of
+        TBool -> pure $ TypValidated TBool --head $ foldl (\acc e -> calcTyp e typEnv : acc) [] body
+        TNum -> throw $ AnaCompilerException ["Type mismatch: while condition must take a bool as an argument"]
     ESet _ e -> calcTyp e typEnv
     ELet bindList bodyList ->
       let localTypEnvIO =
@@ -116,8 +121,8 @@ calcTyp expr typEnv =
             then pure $ TypValidated TBool
             else throw $ AnaCompilerException ["Type mismatch: equal sides must agree on type"]
 
-wellFormedELetBody :: [Expr] -> TEnv -> Validation Error ()
-wellFormedELetBody exprs localEnv =
+wellFormedExprListBody :: [Expr] -> TEnv -> Validation Error ()
+wellFormedExprListBody exprs localEnv =
   let localErrs =
         foldl
           ( \a b ->
@@ -163,13 +168,20 @@ wellFormedE expr env =
           c2 = wellFormedE e2 env
        in c1 *> c2
     EPrim1 _ e1 -> wellFormedE e1 env
-    ESet name e -> 
+    EWhile cond body ->
+      case wellFormedE cond env of
+        Success _ -> wellFormedExprListBody body env
+        Failure errs ->
+          case wellFormedExprListBody body env of
+            Success _ -> Failure errs
+            Failure bodyErrs -> Failure $ bodyErrs <> errs
+    ESet name e ->
       case find name env of
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" name]
         Just _ -> wellFormedE e env
     ELet list body ->
-      let (localEnv, localErrs, _) = wellFormedELetExpr list 0 (Error []) env
-          bodyC = wellFormedELetBody body localEnv
+      let (localEnv, localErrs, _) = wellFormedELetExpr list 0 (Error []) []
+          bodyC = wellFormedExprListBody body localEnv
           c2 = case bodyC of
             Success _ ->
               if null (errors localErrs)
@@ -363,17 +375,33 @@ exprToInstrs expr si counter =
                   ++ [IMov (Reg RAX) (Const constFalse)]
                   ++ [ILabel endCmpBranchLabel]
        in finalOp
+    EWhile cond bodyExprs ->
+      let condInsIO = exprToInstrs cond si counter
+          opForNumIO = do
+            env <- get
+            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env
+            condIns <- condInsIO
+            startBranchLabel <- liftIO $ makeLabel "start" counter
+            endBranchLabel <- liftIO $ makeLabel "end" counter
+            return $
+              ILabel startBranchLabel :
+              condIns
+                ++ [ICmp (Reg RAX) (Const constFalse)]
+                ++ [IJe endBranchLabel]
+                ++ concat (reverse bodyIns)
+                ++ [IJmp startBranchLabel]
+                ++ [ILabel endBranchLabel]
+       in opForNumIO
     ESet name e -> do
       s <- get
       exprIO <- exprToInstrs e si counter
-      let 
-        updateVariable = case find name s of
+      let updateVariable = case find name s of
             Nothing -> []
-            Just i -> 
-              IMov (Reg RAX) (stackloc i)
-              : exprIO
-              ++ [IMov (stackloc i) (Reg RAX)]
-        in pure updateVariable
+            Just i ->
+              IMov (Reg RAX) (stackloc i) :
+              exprIO
+                ++ [IMov (stackloc i) (Reg RAX)]
+       in pure updateVariable
     ELet listBindings listExpr -> do
       -- ev <- get
       -- _ <- liftIO $ putStrLn $ show ev
@@ -424,7 +452,7 @@ compile sexEp = do
         TypValidated typ <- calcTyp expr [("input", TNum)]
         (ExprValidated validatedExpr) <- check expr [("input", 1)]
         compiled <- evalStateT (exprToInstrs validatedExpr 2 counter) [("input", 1)]
-        return $ toAsm $ compiled ++ [IRet] 
+        return $ toAsm $ compiled ++ [IRet]
    in do
         body <- bodyIO
         pure $ body `seq` header ++ body
