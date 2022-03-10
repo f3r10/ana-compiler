@@ -106,6 +106,9 @@ spec = do
     it "ifTestLet" $ do
       a <- test_run "(let ((x 5)) ((if (== x 7) 7 8)))" "ifTestLet" []
       shouldBe a "8"
+    it "setTest" $ do
+      a <- test_run "(let ((x 1)) ((set x 2) x))" "setTest" []
+      shouldBe a "2"
     it "boolTest" $ do
       a <- test_run "true" "boolTest" []
       shouldBe a "true"
@@ -142,9 +145,6 @@ spec = do
     it "inputTest" $ do
       a <- test_run "(add1 input)" "inputTest" ["5"]
       shouldBe a "6"
-    -- it "fail types" $ do
-    --   a <- test_run "(add1 true)" "failTypes" []
-    --   shouldSatisfy a  (T.isInfixOf "expected a number")
     it "failInput" $ do
       a <- test_run "input" "failInput" ["0r"]
       shouldBe a "input must be a boolean or a number"

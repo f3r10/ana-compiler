@@ -36,7 +36,7 @@ timesOperator = satisfy (== '*')
 parseAtom2 :: Parser Sexp
 parseAtom2 =
   ( string "add1"
-      <|> string "sub1"
+      -- <|> string "sub1"
       <|> string "true"
       <|> string "false"
       <|> string "=="
@@ -116,6 +116,7 @@ sexpToExpr (List sexps) =
     [Atom "true"] -> EBool True
     [Atom "false"] -> EBool False
     [Atom "if", e1, e2, e3] -> EIf (sexpToExpr e1) (sexpToExpr e2) (sexpToExpr e3)
+    [Atom "set", Atom val, e1 ] -> ESet val (sexpToExpr e1)
     [Atom "let", List ex1, List simple_e_2] ->
       let 
         la =

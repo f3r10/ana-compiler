@@ -76,6 +76,7 @@ calcTyp expr typEnv =
         Sub1 -> checkTNumType e typEnv
         IsNum -> pure $ TypValidated TBool
         IsBool -> pure $ TypValidated TBool
+    ESet _ e -> calcTyp e typEnv
     ELet bindList bodyList ->
       let localTypEnvIO =
             foldM
@@ -160,6 +161,10 @@ wellFormedE expr env =
           c2 = wellFormedE e2 env
        in c1 *> c2
     EPrim1 _ e1 -> wellFormedE e1 env
+    ESet name e -> 
+      case find name env of
+        Nothing -> Failure $ Error [printf "variable identifier %s unbound" name]
+        Just _ -> wellFormedE e env
     ELet list body ->
       let (localEnv, localErrs, _) = wellFormedELetExpr list 0 (Error []) []
           bodyC = wellFormedELetBody body localEnv
@@ -373,6 +378,17 @@ exprToInstrs expr si counter =
                   ++ [IMov (Reg RAX) (Const constFalse)]
                   ++ [ILabel endCmpBranchLabel]
        in finalOp
+    ESet name e -> do
+      s <- get
+      exprIO <- exprToInstrs e si counter
+      let 
+        updateVariable = case find name s of
+            Nothing -> []
+            Just i -> 
+              IMov (Reg RAX) (stackloc i)
+              : exprIO
+              ++ [IMov (stackloc i) (Reg RAX)]
+        in pure updateVariable
     ELet listBindings listExpr -> do
       -- ev <- get
       -- _ <- liftIO $ putStrLn $ show ev
