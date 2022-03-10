@@ -2,7 +2,7 @@ module AnaCompiler (main) where
 
 import System.Environment (getArgs)
 import AnaCompiler.Parser
-import AnaCompiler.Compile (compile, calcTyp)
+import AnaCompiler.Compile (compile, calcTyp, check)
 
 main :: IO ()
 main =
@@ -26,11 +26,12 @@ main =
             result >>= putStrLn 
         _ ->
           let
-            sexEp = stringToSexp "(== true 5)" --"(let ((x 5) (y 6)) ((add1 y) (add1 x) (+ x y)))"
+            sexEp = stringToSexp "(let ((x (let ((x 5)) (sub1 x)))) (let ((y (sub1 x))) y))"
             sexpToExprRes = sexpToExpr sexEp
             typ = calcTyp sexpToExprRes []
+            checkRes = check sexpToExprRes []
             result = compile sexEp
             in
-            typ >>= print
-            -- result >>= putStrLn
-              -- putStrLn $ show typ
+            -- checkRes >>= print
+            result >>= putStrLn
+              -- putStrLn $ show sexpToExprRes

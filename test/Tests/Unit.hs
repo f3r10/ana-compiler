@@ -71,19 +71,19 @@ spec = do
       a <- test_run "(add1 (add1 (add1 3)))" "add1" []
       shouldBe a "6"
     it "def_x" $ do
-      a <- test_run "(let ((x 5)) (x))" "def_x" []
+      a <- test_run "(let ((x 5)) x)" "def_x" []
       shouldBe a "5"
     it "def_x2" $ do
-      a <- test_run "(let ((x 5)) ((sub1 x)))" "def_x2" []
+      a <- test_run "(let ((x 5)) (sub1 x))" "def_x2" []
       shouldBe a "4"
     it "def_x3" $ do
-      a <- test_run "(let ((x 5)) ((let ((x 67)) ((sub1 x)))))" "def_x3" []
+      a <- test_run "(let ((x 5)) (let ((x 67)) (sub1 x)))" "def_x3" []
       shouldBe a "66"
     it "def_x4" $ do
-      a <- test_run "(let ((x (let ((x 5)) ((sub1 x))))) ((sub1 x)))" "def_x4" []
+      a <- test_run "(let ((x (let ((x 5)) (sub1 x)))) (sub1 x))" "def_x4" []
       shouldBe a "3"
     it "def_x5" $ do
-      a <- test_run "(let ((x 10) (y 7)) ((+ x (sub1 y))))" "def_x5" []
+      a <- test_run "(let ((x 10) (y 7)) (+ x (sub1 y)))" "def_x5" []
       shouldBe a "16"
     it "addnums" $ do
       a <- test_run "(+ 5 10)" "addnums" []
@@ -98,16 +98,16 @@ spec = do
       a <- test_run "(- (* (- 54 3) 2) 102)" "nested_add_arith" []
       shouldBe a "0"
     it "let_nested" $ do
-      a <- test_run "(let ((x (+ 5 (+ 10 20)))) ((* x x)))" "let_nested" []
+      a <- test_run "(let ((x (+ 5 (+ 10 20)))) (* x x))" "let_nested" []
       shouldBe a "1225"
     it "ifTest" $ do
       a <- test_run "(if true 5 6)" "ifTest" []
       shouldBe a "5"
     it "ifTestLet" $ do
-      a <- test_run "(let ((x 5)) ((if (== x 7) 7 8)))" "ifTestLet" []
+      a <- test_run "(let ((x 5)) (if (== x 7) 7 8))" "ifTestLet" []
       shouldBe a "8"
     it "setTest" $ do
-      a <- test_run "(let ((x 1)) ((set x 2) x))" "setTest" []
+      a <- test_run "(let ((x 1)) (set x 2) x)" "setTest" []
       shouldBe a "2"
     it "boolTest" $ do
       a <- test_run "true" "boolTest" []
@@ -134,7 +134,7 @@ spec = do
       a <- test_run "input" "input4" []
       shouldBe a "false"
     it "inputShadow" $ do
-      a <- test_run "(let ((input 10)) (input))" "inputShadow" ["5"]
+      a <- test_run "(let ((input 10)) input)" "inputShadow" ["5"]
       shouldBe a "10"
     it "inputTest" $ do
       a <- test_run "(add1 input)" "inputTest" ["5"]
@@ -159,7 +159,7 @@ spec = do
           result = compile sexp
        in result `shouldThrow` errorCall "Compile error: Non-representable number 4611686018427387903"
     it "failLet" $
-      let sexp = Parser.stringToSexp "(let ((x  1) (y 1) (x 10)) (x))"
+      let sexp = Parser.stringToSexp "(let ((x  1) (y 1) (x 10)) x)"
           result = compile sexp
        in result `shouldThrow` (== AnaCompilerException ["Multiple bindings for variable identifier x"])
     it "failID" $

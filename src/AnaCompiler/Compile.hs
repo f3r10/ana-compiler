@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module AnaCompiler.Compile (compile, AnaCompilerException (..), calcTyp) where
+module AnaCompiler.Compile (compile, AnaCompilerException (..), calcTyp, check) where
 
 import AnaCompiler.Asm (Arg (Const, Reg, RegOffset), Instruction (..), Reg (RAX, RDI, RSP), toAsm)
 import AnaCompiler.Expr
@@ -45,7 +45,9 @@ insertVal (x, si) env =
     Nothing -> (x, si) : env
     _ -> env
 
-newtype ExprValidated = ExprValidated Expr
+newtype ExprValidated 
+  = ExprValidated Expr
+  deriving (Show)
 
 newtype TypValidated
   = TypValidated Typ
@@ -166,7 +168,7 @@ wellFormedE expr env =
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" name]
         Just _ -> wellFormedE e env
     ELet list body ->
-      let (localEnv, localErrs, _) = wellFormedELetExpr list 0 (Error []) []
+      let (localEnv, localErrs, _) = wellFormedELetExpr list 0 (Error []) env
           bodyC = wellFormedELetBody body localEnv
           c2 = case bodyC of
             Success _ ->

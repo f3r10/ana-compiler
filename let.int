@@ -1,1 +1,1 @@
-(let ((x (let ((x 5)) ((sub1 x))))) ((let ((y (sub1 x))) ((sub1 y))) (sub1 y)))
+(let ((x (let ((x 5)) (sub1 x)))) (let ((y (sub1 x))) y))

@@ -117,7 +117,19 @@ sexpToExpr (List sexps) =
     [Atom "false"] -> EBool False
     [Atom "if", e1, e2, e3] -> EIf (sexpToExpr e1) (sexpToExpr e2) (sexpToExpr e3)
     [Atom "set", Atom val, e1 ] -> ESet val (sexpToExpr e1)
-    [Atom "let", List ex1, List simple_e_2] ->
+    [Atom "let", List ex1, simpleLetBody] ->
+      let 
+        la =
+            foldl
+              ( \a b ->
+                  case b of
+                    List [Atom n, ie] -> (n, sexpToExpr ie) : a
+                    _ -> error $ "invalid let rec expression " ++ show b
+              )
+              []
+              ex1
+       in ELet (reverse la) [sexpToExpr simpleLetBody]
+    Atom "let" : List ex1 : listLetBody ->
       let 
         la =
             foldl
@@ -133,8 +145,6 @@ sexpToExpr (List sexps) =
               ( \a b ->
                 case b of
                   simpleAtom@(Atom _) -> sexpToExpr simpleAtom : a
-                  bExp@(List _) -> sexpToExpr bExp : a
-                  {- _ -> error $ "invalid let rec body expression " ++ show b -} ) [] simple_e_2
+                  bExp@(List _) -> sexpToExpr bExp : a) [] listLetBody
        in ELet (reverse la) (reverse l2)
-    -- [Atom s] -> stringToExpr s
     a -> error $ "Parse failed at Sexp->Expr conversion " ++ show a
