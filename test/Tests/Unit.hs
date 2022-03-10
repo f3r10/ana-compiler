@@ -130,24 +130,18 @@ spec = do
     it "input1" $ do
       a <- test_run "input" "input1" ["42"]
       shouldBe a "42"
-    it "input2" $ do
-      a <- test_run "input" "input2" ["true"]
-      shouldBe a "true"
-    it "input3" $ do
-      a <- test_run "input" "input3" ["false"]
-      shouldBe a "false"
     it "input4" $ do
       a <- test_run "input" "input4" []
       shouldBe a "false"
     it "inputShadow" $ do
-      a <- test_run "(let ((input 10)) (input))" "inputShadow" ["true"]
+      a <- test_run "(let ((input 10)) (input))" "inputShadow" ["5"]
       shouldBe a "10"
     it "inputTest" $ do
       a <- test_run "(add1 input)" "inputTest" ["5"]
       shouldBe a "6"
     it "failInput" $ do
       a <- test_run "input" "failInput" ["0r"]
-      shouldBe a "input must be a boolean or a number"
+      shouldBe a "input must a number"
     it "inputerr_max" $ do
       a <- test_run "input" "inputerr_max" ["4611686018427387904"]
       shouldBe a "input is not a representable number"
@@ -156,10 +150,10 @@ spec = do
       shouldBe a "input is not a representable number"
     it "inputerr_case" $ do
       a <- test_run "input" "inputerr_case" ["False"]
-      shouldBe a "input must be a boolean or a number"
+      shouldBe a "input must a number"
     it "failInputType" $ do
       a <- test_run "(add1 input)" "failInputType" ["true"]
-      shouldSatisfy a (T.isInfixOf "expected a number")
+      shouldBe a "input must a number"
     it "non-representable number" $
       let sexp = Parser.stringToSexp "(+ 4611686018427387903 10)"
           result = compile sexp

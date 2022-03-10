@@ -48,27 +48,21 @@ int main(int argc, char** argv) {
   if (argc < 2) {
     input_val = FALSE;
   } else {
-    if (strcmp("false", argv[1]) == 0) {
-      input_val = FALSE;
-    } else if (strcmp("true", argv[1]) == 0) {
-      input_val = TRUE;
+    char *endptr;
+    long v = strtoll(argv[1], &endptr, 0);
+    if (*endptr != '\0') {
+      fprintf(stderr, "input must a number\n");
+      exit(1);
+    }
+    if (v < BOA_MIN) {
+      fprintf(stderr, "input is not a representable number\n");
+      exit(1);
+    } else if (v > BOA_MAX) {
+      fprintf(stderr, "input is not a representable number\n");
+      exit(1);
     } else {
-      char *endptr;
-      long v = strtoll(argv[1], &endptr, 0);
-      if (*endptr != '\0') {
-        fprintf(stderr, "input must be a boolean or a number\n");
-        exit(1);
-      }
-      if (v < BOA_MIN) {
-        fprintf(stderr, "input is not a representable number\n");
-        exit(1);
-      } else if (v > BOA_MAX) {
-        fprintf(stderr, "input is not a representable number\n");
-        exit(1);
-      } else {
-        input_val = (int64_t) v;
-        input_val = (input_val << 1) ^ 1;
-      }
+      input_val = (int64_t) v;
+      input_val = (input_val << 1) ^ 1;
     }
   }
 
