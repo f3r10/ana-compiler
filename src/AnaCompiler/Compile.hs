@@ -193,20 +193,6 @@ check expr env =
     Success _ -> pure $ ExprValidated expr
     Failure errs -> throw $ AnaCompilerException $ errors errs
 
-checkIfIsNumberOnRuntime :: [Instruction]
-checkIfIsNumberOnRuntime =
-  [IAnd (Reg RAX) (Const 1)]
-    ++ [ICmp (Reg RAX) (Const 1)]
-    ++ [IJne "internal_error_non_number"]
-
-internalErrorNonNumber :: [Instruction]
-internalErrorNonNumber =
-  [ ILabel "internal_error_non_number",
-    IMov (Reg RDI) (Reg RAX),
-    IPush (Const 0),
-    ICall "error_non_number"
-  ]
-
 type Counter = Int -> IO Int
 
 makeCounter :: IO Counter
@@ -246,10 +232,8 @@ exprToInstrs expr si counter =
             return $
               exp1Ins
                 ++ [IMov (stackloc si) (Reg RAX)]
-                ++ checkIfIsNumberOnRuntime
                 ++ exp2Ins
                 ++ [IMov (stackloc $ si + 1) (Reg RAX)]
-                ++ checkIfIsNumberOnRuntime
                 ++ [IMov (Reg RAX) (stackloc si)]
           final_op =
             case prim of
@@ -340,7 +324,6 @@ exprToInstrs expr si counter =
             return $
               expIns
                 ++ [IMov (stackloc si) (Reg RAX)]
-                ++ checkIfIsNumberOnRuntime
                 ++ [IMov (Reg RAX) (stackloc si)]
           finalOp = case prim1 of
             Add1 -> do
@@ -439,7 +422,7 @@ compile sexEp = do
         TypValidated typ <- calcTyp expr [("input", TNum)]
         (ExprValidated validatedExpr) <- check expr [("input", 1)]
         compiled <- evalStateT (exprToInstrs validatedExpr 2 counter) [("input", 1)]
-        return $ toAsm $ compiled ++ [IRet] ++ internalErrorNonNumber
+        return $ toAsm $ compiled ++ [IRet] 
    in do
         body <- bodyIO
         pure $ body `seq` header ++ body
