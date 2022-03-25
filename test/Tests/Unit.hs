@@ -20,8 +20,8 @@ type Program = String
 
 test_run :: Program -> String -> [String] -> IO T.Text
 test_run program name args =
-  let sexp = Parser.stringToSexp program
-      result = compile sexp
+  let prog = Parser.parseProgram $ Parser.stringToSexp program
+      result = compile prog
       name_s = printf "output/%s.s" name
       name_o = printf "output/%s.o" name
       name_run = printf "output/%s.run" name
@@ -161,38 +161,38 @@ spec = do
       a <- test_run "(add1 input)" "failInputType" ["true"]
       shouldBe a "input must a number"
     it "non-representable number" $
-      let sexp = Parser.stringToSexp "(+ 4611686018427387903 10)"
-          result = compile sexp
+      let prog = Parser.parseProgram $ Parser.stringToSexp "(+ 4611686018427387903 10)"
+          result = compile prog
        in result `shouldThrow` errorCall "Compile error: Non-representable number 4611686018427387903"
     it "failLet" $
-      let sexp = Parser.stringToSexp "(let ((x  1) (y 1) (x 10)) x)"
-          result = compile sexp
+      let prog = Parser.parseProgram $ Parser.stringToSexp "(let ((x  1) (y 1) (x 10)) x)"
+          result = compile prog
        in result `shouldThrow` (== AnaCompilerException ["Multiple bindings for variable identifier x"])
     it "failID" $
-      let sexp = Parser.stringToSexp "x"
-          result = compile sexp
+      let prog = Parser.parseProgram $ Parser.stringToSexp "x"
+          result = compile prog
        in result `shouldThrow` (== AnaCompilerException ["variable identifier x unbound"])
     it "add1_arguments" $
-      let sexp = Parser.stringToSexp "(add1 true)"
-          result = compile sexp
+      let prog = Parser.parseProgram $ Parser.stringToSexp "(add1 true)"
+          result = compile prog
        in result `shouldThrow` (== AnaCompilerException ["Type mismatch: op must take a number as an argument"])
     it "plus_arguments" $
-      let sexp = Parser.stringToSexp "(+ 1 true)"
-          result = compile sexp
+      let prog = Parser.parseProgram $ Parser.stringToSexp "(+ 1 true)"
+          result = compile prog
        in result `shouldThrow` (== AnaCompilerException ["Type mismatch: op must take a number as an argument"])
     it "if_condition" $
-      let sexp = Parser.stringToSexp "(if 1 2 (+ 3 2))"
-          result = compile sexp
+      let prog = Parser.parseProgram $ Parser.stringToSexp "(if 1 2 (+ 3 2))"
+          result = compile prog
        in result `shouldThrow` (== AnaCompilerException ["Type mismatch: if expects a boolean in conditional position"])
     it "if_branches" $
-      let sexp = Parser.stringToSexp "(if true false (+ 3 2))"
-          result = compile sexp
+      let prog = Parser.parseProgram $ Parser.stringToSexp "(if true false (+ 3 2))"
+          result = compile prog
        in result `shouldThrow` (== AnaCompilerException ["Type mismatch: if branches must agree on type"])
     it "property" $
       property $
         \() -> () === ()
   describe "parser expression" $ do
     it "parse simple number" $ do
-      shouldBe (Parser.stringToSexp "(2)") (List [Atom "2"])
+      shouldBe (Parser.stringToSexp "(2)") [List [Atom "2"]]
     it "parse an nested let expresion with an add operation" $ do
-      shouldBe (Parser.stringToSexp "(let (x 10) (let (y 10) (+ x y)))") (List [Atom "let", List [Atom "x", Atom "10"], List [Atom "let", List [Atom "y", Atom "10"], List [Atom "+", Atom "x", Atom "y"]]])
+      shouldBe (Parser.stringToSexp "(let (x 10) (let (y 10) (+ x y)))") [List [Atom "let", List [Atom "x", Atom "10"], List [Atom "let", List [Atom "y", Atom "10"], List [Atom "+", Atom "x", Atom "y"]]]]

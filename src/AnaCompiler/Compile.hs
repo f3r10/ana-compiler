@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module AnaCompiler.Compile (compile, AnaCompilerException (..), calcTyp, check) where
+module AnaCompiler.Compile (compile, AnaCompilerException (..), calcTyp, check, TypValidated(..), buildDefEnv, calcProgTyp) where
 
 import AnaCompiler.Asm (Arg (Const, Reg, RegOffset), Instruction (..), Reg (RAX, RDI, RSP), toAsm)
 import AnaCompiler.Expr
@@ -11,6 +11,7 @@ import Data.Bits (Bits (setBit, shiftL))
 import Data.IORef
 import Data.Validation
 import Text.Printf (printf)
+import Data.List
 
 stackloc :: Int -> Arg
 stackloc i = RegOffset (-8 * i) RSP
@@ -19,52 +20,60 @@ constTrue = 0x0000000000000002
 
 constFalse = 0x0000000000000000
 
-type VariableName = String
-
-type VariablePosition = Int
-
-data Typ
-  = TNum
-  | TBool
-  deriving (Eq, Show)
-
-type TEnv = [(VariableName, VariablePosition)]
-
-type TypEnv = [(VariableName, Typ)]
-
 type Eval a = StateT TEnv IO a
 
-find :: String -> TEnv -> Maybe Int
-find = lookup
+findDef :: [Def] -> String -> Maybe Def
+findDef defs nameToFind =
+  case defs of
+    [] -> Nothing
+    d@(DFun name _ _ _) : rest ->
+      if name == nameToFind then Just d else findDef rest nameToFind
 
 type StackIndex = Int
 
 insertVal :: (String, Int) -> TEnv -> TEnv
 insertVal (x, si) env =
-  case find x env of
+  case lookup x env of
     Nothing -> (x, si) : env
     _ -> env
 
 newtype ExprValidated
-  = ExprValidated Expr
+  = ExprValidated Prog
   deriving (Show)
 
 newtype TypValidated
   = TypValidated Typ
-  deriving (Show)
+  deriving (Eq, Show)
 
 newtype Error = Error {errors :: [String]}
   deriving (Semigroup, Show)
 
-checkTNumType :: Expr -> TypEnv -> IO TypValidated
-checkTNumType expr typEnv = do
-  TypValidated tpy <- calcTyp expr typEnv
+calcDefTyp :: DefTypEnv -> Def -> IO TypValidated
+calcDefTyp defEnv (DFun _ args ret body)  = 
+  let
+    lastBodyExpr = last body
+    lastBodyExprTyp = calcTyp lastBodyExpr args defEnv >>= ( \(TypValidated lastExpr) ->
+                    if lastExpr == ret
+                      then pure $ TypValidated ret
+                      else throw $ AnaCompilerException ["Type mismatch: body end is not the same as return typ"]
+                )
+   in lastBodyExprTyp
+
+
+calcProgTyp :: Prog -> TypEnv -> DefTypEnv -> IO TypValidated
+calcProgTyp (defs, main) typEnv defEnv =
+  mapM_ (calcDefTyp defEnv) defs *>
+  calcTyp main typEnv defEnv
+
+checkTNumType :: Expr -> TypEnv -> DefTypEnv -> IO TypValidated
+checkTNumType expr typEnv defTypEnv = do
+  TypValidated tpy <- calcTyp expr typEnv defTypEnv
   case tpy of
     TNum -> pure $ TypValidated TNum
     TBool -> throw $ AnaCompilerException ["Type mismatch: op must take a number as an argument"]
 
-calcTyp :: Expr -> TypEnv -> IO TypValidated
-calcTyp expr typEnv =
+calcTyp :: Expr -> TypEnv -> DefTypEnv -> IO TypValidated
+calcTyp  expr typEnv defTypEnv =
   case expr of
     ENum _ -> pure $ TypValidated TNum
     EBool _ -> pure $ TypValidated TBool
@@ -74,59 +83,74 @@ calcTyp expr typEnv =
         Just typ -> pure $ TypValidated typ
     EPrim1 op e ->
       case op of
-        Add1 -> checkTNumType e typEnv
-        Sub1 -> checkTNumType e typEnv
+        Add1 -> checkTNumType e typEnv defTypEnv
+        Sub1 -> checkTNumType e typEnv defTypEnv
         IsNum -> pure $ TypValidated TBool
         IsBool -> pure $ TypValidated TBool
     EWhile cond _ -> do
-      TypValidated tpy <- calcTyp cond typEnv
+      TypValidated tpy <- calcTyp cond typEnv defTypEnv
       case tpy of
         TBool -> pure $ TypValidated TBool --head $ foldl (\acc e -> calcTyp e typEnv : acc) [] body
         TNum -> throw $ AnaCompilerException ["Type mismatch: while condition must take a bool as an argument"]
-    ESet _ e -> calcTyp e typEnv
+    ESet _ e -> calcTyp e typEnv defTypEnv 
     ELet bindList bodyList ->
       let localTypEnvIO =
             foldM
               ( \acc (valName, e) -> do
-                  TypValidated typ <- calcTyp e acc
+                  TypValidated typ <- calcTyp e acc defTypEnv
                   return $ (valName, typ) : acc
               )
               typEnv
               bindList
           bodyTypList = do
             localTypEnv <- localTypEnvIO
-            head $ foldl (\acc e -> calcTyp e localTypEnv : acc) [] bodyList -- the last element of the exprs on the body
+            head $ foldl (\acc e -> calcTyp e localTypEnv defTypEnv : acc) [] bodyList 
+            -- the last element of the exprs on the body
+            -- for inner functions it would necessary to generate another def typ env???
        in bodyTypList
     EIf condExpr thnExpr elsExpr -> do
-      TypValidated tpy <- calcTyp condExpr typEnv
+      TypValidated tpy <- calcTyp condExpr typEnv defTypEnv
       case tpy of
         TNum -> throw $ AnaCompilerException ["Type mismatch: if expects a boolean in conditional position"]
         TBool -> do
-          TypValidated thnExprType <- calcTyp thnExpr typEnv
-          TypValidated elsExprType <- calcTyp elsExpr typEnv
+          TypValidated thnExprType <- calcTyp thnExpr typEnv defTypEnv
+          TypValidated elsExprType <- calcTyp elsExpr typEnv defTypEnv
           if thnExprType == elsExprType
             then pure $ TypValidated thnExprType
             else throw $ AnaCompilerException ["Type mismatch: if branches must agree on type"]
     EPrim2 op e1 e2 ->
       case op of
-        Plus -> checkTNumType e1 typEnv *> checkTNumType e2 typEnv
-        Minus -> checkTNumType e1 typEnv *> checkTNumType e2 typEnv
-        Times -> checkTNumType e1 typEnv *> checkTNumType e2 typEnv
-        Less -> checkTNumType e1 typEnv *> checkTNumType e2 typEnv *> pure (TypValidated TBool)
-        Greater -> checkTNumType e1 typEnv *> checkTNumType e2 typEnv *> pure (TypValidated TBool)
+        Plus -> checkTNumType e1 typEnv defTypEnv *> checkTNumType e2 typEnv defTypEnv
+        Minus -> checkTNumType e1 typEnv defTypEnv *> checkTNumType e2 typEnv defTypEnv
+        Times -> checkTNumType e1 typEnv defTypEnv *> checkTNumType e2 typEnv defTypEnv
+        Less -> checkTNumType e1 typEnv defTypEnv *> checkTNumType e2 typEnv defTypEnv *> pure (TypValidated TBool)
+        Greater -> checkTNumType e1 typEnv defTypEnv *> checkTNumType e2 typEnv defTypEnv *> pure (TypValidated TBool)
         Equal -> do
-          TypValidated e1Type <- calcTyp e1 typEnv
-          TypValidated e2Type <- calcTyp e2 typEnv
+          TypValidated e1Type <- calcTyp e1 typEnv defTypEnv
+          TypValidated e2Type <- calcTyp e2 typEnv defTypEnv
           if e1Type == e2Type
             then pure $ TypValidated TBool
             else throw $ AnaCompilerException ["Type mismatch: equal sides must agree on type"]
+    EApp name listParams -> 
+      case lookup name defTypEnv of
+        Just (typ, args) ->
+          let 
+            paramsCheck = sequence(reverse (foldl (\acc e -> calcTyp e args defTypEnv : acc) [] listParams)) 
+              >>= (\paramsTyps -> 
+                -- error $ show $ null (paramsTyps \\ (map (TypValidated . snd) args))
+                if null (paramsTyps \\ map (TypValidated . snd) args)
+                   then pure ()
+                   else throw $ AnaCompilerException ["Type mismatch:: params type is not the same as argument type"]
+                  )
+           in  paramsCheck *> pure (TypValidated typ)
+        Nothing -> throw $ AnaCompilerException ["Type mismatch: def is not defined"]
 
-wellFormedExprListBody :: [Expr] -> TEnv -> Validation Error ()
-wellFormedExprListBody exprs localEnv =
+wellFormedExprListBody :: [Def] -> [Expr] -> TEnv -> Validation Error ()
+wellFormedExprListBody defs exprs localEnv =
   let localErrs =
         foldl
           ( \a b ->
-              let vIns = wellFormedE b localEnv
+              let vIns = wellFormedE defs b localEnv
                   fE = case vIns of
                     Failure errs -> a <> errs
                     Success _ -> a
@@ -138,12 +162,12 @@ wellFormedExprListBody exprs localEnv =
         then Success ()
         else Failure localErrs
 
-wellFormedELetExpr :: [(String, Expr)] -> StackIndex -> Error -> TEnv -> (TEnv, Error, StackIndex)
-wellFormedELetExpr list si accError env =
+wellFormedELetExpr :: [Def] -> [(String, Expr)] -> StackIndex -> Error -> TEnv -> (TEnv, Error, StackIndex)
+wellFormedELetExpr defs list si accError env =
   foldl
     ( \(accEnv, accErr, si') (x, value) ->
-        let vIns = wellFormedE value accEnv
-            (b, c, d) = case find x accEnv of
+        let vIns = wellFormedE defs value accEnv
+            (b, c, d) = case lookup x accEnv of
               Nothing -> ((x, si') : accEnv, accErr, si' + 1)
               _ -> (accEnv, Error [printf "Multiple bindings for variable identifier %s" x] <> accErr, si')
             fE = case vIns of
@@ -154,34 +178,35 @@ wellFormedELetExpr list si accError env =
     (env, accError, si)
     list
 
-wellFormedE :: Expr -> TEnv -> Validation Error ()
-wellFormedE expr env =
+
+wellFormedE :: [Def] -> Expr -> TEnv -> Validation Error ()
+wellFormedE defs expr env =
   case expr of
     ENum _ -> Success ()
     EBool _ -> Success ()
     EId x ->
-      case find x env of
+      case lookup x env of
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" x]
         Just _ -> Success ()
     EPrim2 _ e1 e2 ->
-      let c1 = wellFormedE e1 env
-          c2 = wellFormedE e2 env
+      let c1 = wellFormedE defs e1 env
+          c2 = wellFormedE defs e2 env
        in c1 *> c2
-    EPrim1 _ e1 -> wellFormedE e1 env
+    EPrim1 _ e1 -> wellFormedE defs e1 env
     EWhile cond body ->
-      case wellFormedE cond env of
-        Success _ -> wellFormedExprListBody body env
+      case wellFormedE defs cond env of
+        Success _ -> wellFormedExprListBody defs body env
         Failure errs ->
-          case wellFormedExprListBody body env of
+          case wellFormedExprListBody defs body env of
             Success _ -> Failure errs
             Failure bodyErrs -> Failure $ bodyErrs <> errs
     ESet name e ->
-      case find name env of
+      case lookup name env of
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" name]
-        Just _ -> wellFormedE e env
+        Just _ -> wellFormedE defs e env
     ELet list body ->
-      let (localEnv, localErrs, _) = wellFormedELetExpr list 0 (Error []) []
-          bodyC = wellFormedExprListBody body localEnv
+      let (localEnv, localErrs, _) = wellFormedELetExpr defs list 0 (Error []) []
+          bodyC = wellFormedExprListBody defs body localEnv
           c2 = case bodyC of
             Success _ ->
               if null (errors localErrs)
@@ -190,7 +215,20 @@ wellFormedE expr env =
             Failure errs -> Failure $ localErrs <> errs
        in c2
     EIf exp1 exp2 exp3 ->
-      wellFormedE exp1 env *> wellFormedE exp2 env *> wellFormedE exp3 env
+      wellFormedE defs exp1 env *> wellFormedE defs exp2 env *> wellFormedE defs exp3 env
+    EApp nameDef listParams ->
+      case findDef defs nameDef of
+        Just (DFun _ args _ _) -> 
+          let
+            appErrors = 
+              if length listParams == length args
+                 then wellFormedExprListBody defs listParams env
+                 else
+                  case wellFormedExprListBody defs listParams env of
+                    Success _ -> Failure $ Error ["Invalid function call with wrong number of arguments"]
+                    Failure errs -> Failure $ errs <> Error ["Invalid function call with wrong number of arguments"] 
+           in appErrors 
+        Nothing -> Failure $ Error [printf "funtion indentifer %s unbound" nameDef]
 
 newtype AnaCompilerException
   = AnaCompilerException [String]
@@ -201,10 +239,34 @@ instance Show AnaCompilerException where
 
 instance Exception AnaCompilerException
 
-check :: Expr -> TEnv -> IO ExprValidated
-check expr env =
-  case wellFormedE expr env of
-    Success _ -> pure $ ExprValidated expr
+wellFormedDef :: [Def] -> Def -> Validation Error ()
+wellFormedDef defs (DFun _ args _ body) = wellFormedExprListBody defs body (map (\(name, _) -> (name, 1)) args) 
+
+wellFormedProg :: Prog -> Validation Error ()
+wellFormedProg (defs, main) = 
+  let defsValidations = 
+        foldl (\acc def -> 
+          case wellFormedDef defs def of
+              Failure errs -> acc <> errs
+              Success _ -> acc
+          ) (Error []) defs 
+      mainValidation = wellFormedE defs main [("input", 1)] 
+      finalValidation = case mainValidation of
+                          Failure errs ->
+                            if null (errors defsValidations)
+                              then Failure errs 
+                              else Failure $ defsValidations <> errs
+                          Success _ -> 
+                            if null (errors defsValidations)
+                              then Success ()
+                              else Failure  defsValidations
+   in finalValidation
+
+
+check :: Prog -> IO ExprValidated
+check prog =
+  case wellFormedProg prog of
+    Success _ -> pure $ ExprValidated prog
     Failure errs -> throw $ AnaCompilerException $ errors errs
 
 type Counter = Int -> IO Int
@@ -223,12 +285,12 @@ makeLabel label counter = do
   c <- counter 1
   return $ printf "%s_%s" label (show c)
 
-exprToInstrs :: Expr -> StackIndex -> Counter -> Eval [Instruction]
-exprToInstrs expr si counter =
+exprToInstrs :: Expr -> StackIndex -> Counter -> DefTypEnv -> Eval [Instruction]
+exprToInstrs expr si counter defTypEnv =
   case expr of
     EId x -> do
       s <- get
-      let a = case find x s of
+      let a = case lookup x s of
             Nothing -> []
             Just i -> [IMov (Reg RAX) (stackloc i)]
        in pure a
@@ -238,8 +300,8 @@ exprToInstrs expr si counter =
         then pure [IMov (Reg RAX) (Const constTrue)]
         else pure [IMov (Reg RAX) (Const constFalse)]
     EPrim2 prim exp1 exp2 ->
-      let exp1InsIO = exprToInstrs exp1 si counter --env
-          exp2InsIO = exprToInstrs exp2 (si + 1) counter -- env
+      let exp1InsIO = exprToInstrs exp1 si counter defTypEnv --env
+          exp2InsIO = exprToInstrs exp2 (si + 1) counter defTypEnv -- env
           opForNumIO = do
             exp1Ins <- exp1InsIO
             exp2Ins <- exp2InsIO
@@ -312,9 +374,9 @@ exprToInstrs expr si counter =
                     ++ [ILabel endCmpBranchLabel]
        in final_op
     EIf e1 e2 e3 ->
-      let e1isIO = exprToInstrs e1 si counter --env
-          e2isIO = exprToInstrs e2 (si + 1) counter --env -- TODO  this env keeps record of let variables. Is valid to repeat let variables inside blocks?
-          e3isIO = exprToInstrs e3 (si + 2) counter --env
+      let e1isIO = exprToInstrs e1 si counter defTypEnv
+          e2isIO = exprToInstrs e2 (si + 1) counter defTypEnv -- TODO  this env keeps record of let variables. Is valid to repeat let variables inside blocks?
+          e3isIO = exprToInstrs e3 (si + 2) counter defTypEnv
           op = do
             e1is <- e1isIO
             e2is <- e2isIO
@@ -332,7 +394,7 @@ exprToInstrs expr si counter =
                 ++ [ILabel endIfLabel]
        in op
     EPrim1 prim1 exp1 ->
-      let expInsIO = exprToInstrs exp1 si counter --env
+      let expInsIO = exprToInstrs exp1 si counter defTypEnv
           opForNumIO = do
             expIns <- expInsIO
             return $
@@ -376,10 +438,10 @@ exprToInstrs expr si counter =
                   ++ [ILabel endCmpBranchLabel]
        in finalOp
     EWhile cond bodyExprs ->
-      let condInsIO = exprToInstrs cond si counter
+      let condInsIO = exprToInstrs cond si counter defTypEnv
           opForNumIO = do
             env <- get
-            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env
+            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env defTypEnv
             condIns <- condInsIO
             startBranchLabel <- liftIO $ makeLabel "start" counter
             endBranchLabel <- liftIO $ makeLabel "end" counter
@@ -394,8 +456,8 @@ exprToInstrs expr si counter =
        in opForNumIO
     ESet name e -> do
       s <- get
-      exprIO <- exprToInstrs e si counter
-      let updateVariable = case find name s of
+      exprIO <- exprToInstrs e si counter defTypEnv
+      let updateVariable = case lookup name s of
             Nothing -> []
             Just i ->
               IMov (Reg RAX) (stackloc i) :
@@ -405,30 +467,31 @@ exprToInstrs expr si counter =
     ELet listBindings listExpr -> do
       -- ev <- get
       -- _ <- liftIO $ putStrLn $ show ev
-      ((ins, si'), localEnv) <- liftIO $ runStateT (compileLetExpr listBindings si counter) []
+      ((ins, si'), localEnv) <- liftIO $ runStateT (compileLetExpr listBindings si counter defTypEnv) []
       -- _ <- liftIO $ putStrLn $ show ins
       -- _ <- liftIO $ putStrLn $ show localEnv
       -- _ <- liftIO $ putStrLn $ show listExpr
-      b_is <- liftIO $ compileLetBody listExpr si' counter localEnv
+      b_is <- liftIO $ compileLetBody listExpr si' counter localEnv defTypEnv
       -- _ <- liftIO $ putStrLn $ show (reverse b_is)
       return $ ins ++ concat (reverse b_is)
+    EApp nameDef listParams -> undefined
 
-compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv -> IO [[Instruction]]
-compileLetBody exprs si counter localEnv =
+compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv -> DefTypEnv -> IO [[Instruction]]
+compileLetBody exprs si counter localEnv defTypEnv =
   foldl
     ( \a b -> do
         c <- a
-        d <- evalStateT (exprToInstrs b si counter) localEnv
+        d <- evalStateT (exprToInstrs b si counter defTypEnv) localEnv
         return $ d : c
     )
     (pure [])
     exprs
 
-compileLetExpr :: [(String, Expr)] -> StackIndex -> Counter -> Eval ([Instruction], StackIndex)
-compileLetExpr list si counter =
+compileLetExpr :: [(String, Expr)] -> StackIndex -> Counter -> DefTypEnv -> Eval ([Instruction], StackIndex)
+compileLetExpr list si counter defTypEnv =
   foldM
     ( \(acc, si') (x, value) ->
-        let vInstIO = runStateT (exprToInstrs value si' counter) []
+        let vInstIO = runStateT (exprToInstrs value si' counter defTypEnv) []
             store = IMov (stackloc si') (Reg RAX)
          in do
               (vIns, ev) <- liftIO vInstIO
@@ -437,8 +500,13 @@ compileLetExpr list si counter =
     ([], si)
     list
 
-compile :: Sexp -> IO String
-compile sexEp = do
+
+buildDefEnv :: [Def] -> DefTypEnv
+buildDefEnv = 
+  foldl (\acc (DFun name args ret _) -> (name, (ret, args)): acc) []
+
+compile :: Prog -> IO String
+compile prog@(defs, _) = do
   counter <- makeCounter
   let header =
         "section .text\n\
@@ -447,11 +515,12 @@ compile sexEp = do
         \global our_code_starts_here\n\
         \our_code_starts_here:\n\
         \mov [rsp - 8], rdi"
-      expr = sexpToExpr sexEp
+      -- expr = sexpToExpr main
+      defEnv = buildDefEnv defs
       bodyIO = do
-        TypValidated typ <- calcTyp expr [("input", TNum)]
-        (ExprValidated validatedExpr) <- check expr [("input", 1)]
-        compiled <- evalStateT (exprToInstrs validatedExpr 2 counter) [("input", 1)]
+        TypValidated typ <- calcProgTyp prog [("input", TNum)] defEnv
+        (ExprValidated (validDefs, validMain)) <- check prog
+        compiled <- evalStateT (exprToInstrs validMain 2 counter defEnv) [("input", 1)]
         return $ toAsm $ compiled ++ [IRet]
    in do
         body <- bodyIO

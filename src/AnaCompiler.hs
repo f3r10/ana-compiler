@@ -2,7 +2,7 @@ module AnaCompiler (main) where
 
 import System.Environment (getArgs)
 import AnaCompiler.Parser
-import AnaCompiler.Compile (compile, calcTyp, check)
+import AnaCompiler.Compile (compile, calcProgTyp, check, buildDefEnv)
 
 main :: IO ()
 main =
@@ -20,18 +20,25 @@ main =
         [input] -> do
           content <- readFile input
           let
-           sexEp = stringToSexp content
-           result = compile sexEp
+           sexEps = stringToSexp content
+           prog = parseProgram sexEps 
+           result = compile prog
            in
             result >>= putStrLn 
         _ ->
           let
-            sexEp = stringToSexp "(let ((x 5) (y 6)) (add1 y) (add1 x) (+ x y))"
-            sexpToExprRes = sexpToExpr sexEp
-            typ = calcTyp sexpToExprRes []
-            checkRes = check sexpToExprRes []
-            result = compile sexEp
+            exp1 = "(def even (n : Num) : Bool (if (== n 0) true (odd (- n 1))))\n\
+               \(def odd (n : Num) : Bool (if (== n 0) false (even (- n 1))))\n\
+               \(even 2)"
+            exp2 = "(+ -42 10)"
+            sexEps = stringToSexp exp1
+            prog = parseProgram sexEps
+            defEnv = buildDefEnv (fst prog)
+            typ = calcProgTyp prog [] defEnv
+            checkRes = check prog
+            result = compile prog
             in
+              putStrLn $ show (fst prog)
             -- checkRes >>= print
-            result >>= putStrLn
-              -- putStrLn $ show sexpToExprRes
+            -- result >>= putStrLn
+
