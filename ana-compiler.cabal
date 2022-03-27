@@ -39,6 +39,7 @@ library
         , parsec 
         , validation
         , mtl
+        , text
     hs-source-dirs:   src
 
 executable compile

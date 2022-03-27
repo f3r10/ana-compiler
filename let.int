@@ -1,1 +1,2 @@
-(let ((c 10) (x 0) (y (while (> c x) (set x (+ x 1)) 5))) y)
+(def fun (n : Num) : Num (+ n 1))
+(let ((x 10)) (let ((z (fun x))) (+ 3 z)))
