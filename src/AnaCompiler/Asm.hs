@@ -11,6 +11,7 @@ import Text.Printf (printf)
 
 data Reg
   = RAX {- the register where we place answers -}
+  | RBX
   | RSP -- the stack pointer
   | RDI -- the first function argument goes here
   deriving (Show)
@@ -26,6 +27,7 @@ data Arg
   | Reg Reg
   | RegOffset Int Reg
   | Size Size Arg
+  | Label String
   deriving (Show)
 
 data Instruction
@@ -60,6 +62,7 @@ rToAsm r =
     RAX -> "rax"
     RSP -> "rsp"
     RDI -> "rdi"
+    RBX -> "rbx"
 
 argToAsm :: Arg -> String
 argToAsm arg =
@@ -72,6 +75,7 @@ argToAsm arg =
         DWORD_PTR -> printf "DWORD %s" (argToAsm reg)
         WORD_PTR -> printf "WORD %s" (argToAsm reg)
         BYTE_PTR -> printf "BYTE %s" (argToAsm reg)
+    Label name -> name 
 
 iToAsm :: Instruction -> String
 iToAsm ins =
