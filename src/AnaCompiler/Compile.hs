@@ -2,7 +2,7 @@
 
 module AnaCompiler.Compile (compile, AnaCompilerException (..), calcTyp, check, TypValidated(..), buildDefEnv, calcProgTyp) where
 
-import AnaCompiler.Asm (Arg (Const, Reg, RegOffset), Instruction (..), Reg (RAX, RDI, RSP), toAsm)
+import AnaCompiler.Asm (Arg (Const, Reg, RegOffset, Label, Size), Instruction (..), Reg (RAX, RDI, RSP, RBX), toAsm, Size (DWORD_PTR, WORD_PTR))
 import AnaCompiler.Expr
 import AnaCompiler.Parser (Sexp, sexpToExpr)
 import Control.Exception (Exception, throw)
@@ -135,7 +135,7 @@ calcTyp  expr typEnv defTypEnv =
       case lookup name defTypEnv of
         Just (typ, args) ->
           let 
-            paramsCheck = sequence(reverse (foldl (\acc e -> calcTyp e args defTypEnv : acc) [] listParams)) 
+            paramsCheck = sequence(reverse (foldl (\acc e -> calcTyp e typEnv defTypEnv : acc) [] listParams)) 
               >>= (\paramsTyps -> 
                 -- error $ show $ null (paramsTyps \\ (map (TypValidated . snd) args))
                 if null (paramsTyps \\ map (TypValidated . snd) args)
@@ -205,7 +205,8 @@ wellFormedE defs expr env =
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" name]
         Just _ -> wellFormedE defs e env
     ELet list body ->
-      let (localEnv, localErrs, _) = wellFormedELetExpr defs list 0 (Error []) []
+      let shadowEnv = concatMap (\(name, _) -> filter (\(envName, _) -> name /= envName) env ) list
+          (localEnv, localErrs, _) = wellFormedELetExpr defs list 0 (Error []) shadowEnv
           bodyC = wellFormedExprListBody defs body localEnv
           c2 = case bodyC of
             Success _ ->
@@ -285,8 +286,8 @@ makeLabel label counter = do
   c <- counter 1
   return $ printf "%s_%s" label (show c)
 
-exprToInstrs :: Expr -> StackIndex -> Counter -> DefTypEnv -> Eval [Instruction]
-exprToInstrs expr si counter defTypEnv =
+exprToInstrs :: Expr -> StackIndex -> Counter -> [Def] -> Eval [Instruction]
+exprToInstrs expr si counter defs =
   case expr of
     EId x -> do
       s <- get
@@ -300,8 +301,8 @@ exprToInstrs expr si counter defTypEnv =
         then pure [IMov (Reg RAX) (Const constTrue)]
         else pure [IMov (Reg RAX) (Const constFalse)]
     EPrim2 prim exp1 exp2 ->
-      let exp1InsIO = exprToInstrs exp1 si counter defTypEnv --env
-          exp2InsIO = exprToInstrs exp2 (si + 1) counter defTypEnv -- env
+      let exp1InsIO = exprToInstrs exp1 si counter defs
+          exp2InsIO = exprToInstrs exp2 (si + 1) counter defs
           opForNumIO = do
             exp1Ins <- exp1InsIO
             exp2Ins <- exp2InsIO
@@ -374,9 +375,9 @@ exprToInstrs expr si counter defTypEnv =
                     ++ [ILabel endCmpBranchLabel]
        in final_op
     EIf e1 e2 e3 ->
-      let e1isIO = exprToInstrs e1 si counter defTypEnv
-          e2isIO = exprToInstrs e2 (si + 1) counter defTypEnv -- TODO  this env keeps record of let variables. Is valid to repeat let variables inside blocks?
-          e3isIO = exprToInstrs e3 (si + 2) counter defTypEnv
+      let e1isIO = exprToInstrs e1 si counter defs
+          e2isIO = exprToInstrs e2 (si + 1) counter defs -- TODO  this env keeps record of let variables. Is valid to repeat let variables inside blocks?
+          e3isIO = exprToInstrs e3 (si + 2) counter defs
           op = do
             e1is <- e1isIO
             e2is <- e2isIO
@@ -394,7 +395,7 @@ exprToInstrs expr si counter defTypEnv =
                 ++ [ILabel endIfLabel]
        in op
     EPrim1 prim1 exp1 ->
-      let expInsIO = exprToInstrs exp1 si counter defTypEnv
+      let expInsIO = exprToInstrs exp1 si counter defs
           opForNumIO = do
             expIns <- expInsIO
             return $
@@ -438,10 +439,10 @@ exprToInstrs expr si counter defTypEnv =
                   ++ [ILabel endCmpBranchLabel]
        in finalOp
     EWhile cond bodyExprs ->
-      let condInsIO = exprToInstrs cond si counter defTypEnv
+      let condInsIO = exprToInstrs cond si counter defs
           opForNumIO = do
             env <- get
-            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env defTypEnv
+            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env defs
             condIns <- condInsIO
             startBranchLabel <- liftIO $ makeLabel "start" counter
             endBranchLabel <- liftIO $ makeLabel "end" counter
@@ -456,7 +457,7 @@ exprToInstrs expr si counter defTypEnv =
        in opForNumIO
     ESet name e -> do
       s <- get
-      exprIO <- exprToInstrs e si counter defTypEnv
+      exprIO <- exprToInstrs e si counter defs
       let updateVariable = case lookup name s of
             Nothing -> []
             Just i ->
@@ -467,31 +468,58 @@ exprToInstrs expr si counter defTypEnv =
     ELet listBindings listExpr -> do
       -- ev <- get
       -- _ <- liftIO $ putStrLn $ show ev
-      ((ins, si'), localEnv) <- liftIO $ runStateT (compileLetExpr listBindings si counter defTypEnv) []
+      ((ins, si'), localEnv) <- liftIO $ runStateT (compileLetExpr listBindings si counter defs) []
       -- _ <- liftIO $ putStrLn $ show ins
       -- _ <- liftIO $ putStrLn $ show localEnv
       -- _ <- liftIO $ putStrLn $ show listExpr
-      b_is <- liftIO $ compileLetBody listExpr si' counter localEnv defTypEnv
+      b_is <- liftIO $ compileLetBody listExpr si' counter localEnv defs
       -- _ <- liftIO $ putStrLn $ show (reverse b_is)
       return $ ins ++ concat (reverse b_is)
-    EApp nameDef listParams -> undefined
+    EApp nameDef listParams -> do
+      currentVarEnv <- get
+      afterCallLabel <- liftIO $ makeLabel "after_call" counter
+      (paramsIns, _) <- liftIO $ compileEAppParams listParams (si+2) counter defs currentVarEnv 
+      let headerIns = 
+            IMov (Reg RBX) (Label afterCallLabel) :
+            [IMov (stackloc si) (Reg RBX)] ++
+            [IMov (stackloc (si+1)) (Reg RSP)] ++ 
+            paramsIns ++ 
+            [ISub (Reg RSP) (Const (si * 8)) ] ++
+            [IJmp nameDef] ++ 
+            [ILabel afterCallLabel] ++ 
+            [IMov (Reg RSP) (RegOffset (-16) RSP)]
+      pure headerIns
 
-compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv -> DefTypEnv -> IO [[Instruction]]
-compileLetBody exprs si counter localEnv defTypEnv =
+compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv -> [Def] -> IO [[Instruction]]
+compileLetBody exprs si counter localEnv defs =
   foldl
     ( \a b -> do
         c <- a
-        d <- evalStateT (exprToInstrs b si counter defTypEnv) localEnv
+        d <- evalStateT (exprToInstrs b si counter defs) localEnv
         return $ d : c
     )
     (pure [])
     exprs
 
-compileLetExpr :: [(String, Expr)] -> StackIndex -> Counter -> DefTypEnv -> Eval ([Instruction], StackIndex)
-compileLetExpr list si counter defTypEnv =
+
+compileEAppParams :: [Expr] -> StackIndex -> Counter -> [Def] -> TEnv -> IO ([Instruction], StackIndex)
+compileEAppParams list si counter defs currentVarEnv =
+  foldM
+    ( \(acc, si') expr ->
+        let vInstIO = evalStateT (exprToInstrs expr si' counter defs) currentVarEnv
+            store = IMov (stackloc si') (Reg RAX)
+         in do
+           vIns <- vInstIO
+           pure (acc ++ vIns ++ [store], si' + 1)
+    )
+    ([], si)
+    list
+
+compileLetExpr :: [(String, Expr)] -> StackIndex -> Counter -> [Def] -> Eval ([Instruction], StackIndex)
+compileLetExpr list si counter defs =
   foldM
     ( \(acc, si') (x, value) ->
-        let vInstIO = runStateT (exprToInstrs value si' counter defTypEnv) []
+        let vInstIO = runStateT (exprToInstrs value si' counter defs) []
             store = IMov (stackloc si') (Reg RAX)
          in do
               (vIns, ev) <- liftIO vInstIO
@@ -500,28 +528,44 @@ compileLetExpr list si counter defTypEnv =
     ([], si)
     list
 
+-- local variables enviroment depends on the number of args
+compileDef :: Counter -> [Def] -> Def  -> IO [Instruction]
+compileDef counter defs (DFun name args _ body) = 
+  let
+    (localSi, localVarEnv) 
+      = mapAccumL (\acc (argName, _) -> (acc+1, (argName, acc) )) 2 args -- (zip ([0..1]::[Int]) args)
+    compiledBody = compileLetBody body localSi counter localVarEnv defs  
+    compiledFunction = (\b -> [ILabel name] ++ concat (reverse b) ++ [IRet] ) <$> compiledBody 
+  in compiledFunction
+
 
 buildDefEnv :: [Def] -> DefTypEnv
 buildDefEnv = 
   foldl (\acc (DFun name args ret _) -> (name, (ret, args)): acc) []
 
 compile :: Prog -> IO String
-compile prog@(defs, _) = do
+compile prog = do
   counter <- makeCounter
-  let header =
-        "section .text\n\
-        \extern error\n\
-        \extern error_non_number\n\
-        \global our_code_starts_here\n\
-        \our_code_starts_here:\n\
-        \mov [rsp - 8], rdi"
+  let prelude =
+        " section .text\n\
+          \extern error\n\
+          \extern error_non_number\n\
+          \global our_code_starts_here\n"
       -- expr = sexpToExpr main
-      defEnv = buildDefEnv defs
-      bodyIO = do
-        TypValidated typ <- calcProgTyp prog [("input", TNum)] defEnv
-        (ExprValidated (validDefs, validMain)) <- check prog
-        compiled <- evalStateT (exprToInstrs validMain 2 counter defEnv) [("input", 1)]
-        return $ toAsm $ compiled ++ [IRet]
+      result = do
+        (ExprValidated validProg@(validDefs, validMain)) <- check prog
+        let defEnv = buildDefEnv validDefs
+        _ <- calcProgTyp validProg [("input", TNum)] defEnv
+        compiledDefs <- concat <$> mapM (compileDef counter validDefs) validDefs
+        compiledMain <- evalStateT (exprToInstrs validMain 2 counter validDefs) [("input", 1)]
+        let kickoff = 
+              "our_code_starts_here:\n\
+              \push rbx\n\
+               \mov [rsp - 8], rdi" ++
+              toAsm compiledMain ++ "\n pop rbx\nret\n"
+        let postlude = [] --TODO how should end the defs definition???
+        let asAssemblyString = toAsm (compiledDefs ++ postlude) 
+        return (kickoff, asAssemblyString)
    in do
-        body <- bodyIO
-        pure $ body `seq` header ++ body
+        body <- result
+        pure $ printf "%s%s\n%s\n" prelude (snd body) (fst body)
