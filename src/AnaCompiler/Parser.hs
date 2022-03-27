@@ -42,11 +42,7 @@ timesOperator = satisfy (== '*')
 -- this parsers has to go first since it has to detect an string ending up with a digit
 parseAtom2 :: Parser Sexp
 parseAtom2 =
-  ( string "add1"
-      -- <|> string "sub1"
-      <|> string "true"
-      <|> string "false"
-      <|> string "=="
+  ( string "=="
       <|> string ":"
   )
     >>= return . Atom
@@ -153,9 +149,9 @@ sexpToExpr (List sexps) =
               []
               listLetBody
        in ELet (reverse la) (reverse l2)
-    [Atom nameFun, listParams] ->
-       {- error $ show (sexpToExpr listParams) -} EApp nameFun [sexpToExpr listParams]
-    [Atom s] -> stringToExpr s
+    [Atom nameFun, listParams] -> EApp nameFun [sexpToExpr listParams]
+    Atom nameFun : rest -> EApp nameFun (reverse $ foldl (\acc ex -> sexpToExpr ex : acc) [] rest) 
+    -- [Atom s] -> stringToExpr s
     a -> error $ "Parse failed at Sexp->Expr conversion " ++ show a
 
 parseDefParams :: [Sexp] -> TypEnv
