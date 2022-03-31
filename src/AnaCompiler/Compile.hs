@@ -87,6 +87,7 @@ calcTyp  expr typEnv defTypEnv =
         Sub1 -> checkTNumType e typEnv defTypEnv
         IsNum -> pure $ TypValidated TBool
         IsBool -> pure $ TypValidated TBool
+        Print -> calcTyp e typEnv defTypEnv
     EWhile cond _ -> do
       TypValidated tpy <- calcTyp cond typEnv defTypEnv
       case tpy of
@@ -205,7 +206,11 @@ wellFormedE defs expr env =
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" name]
         Just _ -> wellFormedE defs e env
     ELet list body ->
-      let shadowEnv = concatMap (\(name, _) -> filter (\(envName, _) -> name /= envName) env ) list
+      let shadowEnv = filter (\(name, _) -> 
+            case lookup name list of
+              Just _ -> False
+              Nothing -> True
+            ) env
           (localEnv, localErrs, _) = wellFormedELetExpr defs list 0 (Error []) shadowEnv
           bodyC = wellFormedExprListBody defs body localEnv
           c2 = case bodyC of
@@ -214,7 +219,7 @@ wellFormedE defs expr env =
                 then Success ()
                 else Failure localErrs
             Failure errs -> Failure $ localErrs <> errs
-       in c2
+       in c2 --error ("env: " ++ show env ++ "\n list: " ++ show list ++ "\n shadowEnv: " ++ show shadowEnv)
     EIf exp1 exp2 exp3 ->
       wellFormedE defs exp1 env *> wellFormedE defs exp2 env *> wellFormedE defs exp3 env
     EApp nameDef listParams ->
@@ -437,13 +442,22 @@ exprToInstrs expr si counter defs =
                   ++ [ILabel noBoolBranchLabel]
                   ++ [IMov (Reg RAX) (Const constFalse)]
                   ++ [ILabel endCmpBranchLabel]
+            Print -> do
+              opForNum <- opForNumIO
+              let stackAlignment = checkStackAligment si
+              pure $ 
+                opForNum ++ 
+                [IMov (Reg RDI) (Reg RAX)] ++
+                [ISub (Reg RSP) (Const (stackAlignment * 8)) ] ++
+                [ICall "print"] ++
+                [IAdd (Reg RSP) (Const (stackAlignment * 8))]
        in finalOp
     EWhile cond bodyExprs ->
       let condInsIO = exprToInstrs cond si counter defs
           opForNumIO = do
+            condIns <- condInsIO
             env <- get
             bodyIns <- liftIO $ compileLetBody bodyExprs si counter env defs
-            condIns <- condInsIO
             startBranchLabel <- liftIO $ makeLabel "start" counter
             endBranchLabel <- liftIO $ makeLabel "end" counter
             return $
@@ -466,9 +480,16 @@ exprToInstrs expr si counter defs =
                 ++ [IMov (stackloc i) (Reg RAX)]
        in pure updateVariable
     ELet listBindings listExpr -> do
-      -- ev <- get
+      ev <- get
+      let shadowEnv = filter (\(name, _) -> 
+            case lookup name listBindings of
+              Just _ -> False
+              Nothing -> True
+            ) ev
       -- _ <- liftIO $ putStrLn $ show ev
-      ((ins, si'), localEnv) <- liftIO $ runStateT (compileLetExpr listBindings si counter defs) []
+      -- _ <- liftIO $ putStrLn $ show shadowEnv
+      -- _ <- liftIO $ putStrLn $ show listBindings
+      ((ins, si'), localEnv) <- liftIO $ runStateT (compileLetExpr listBindings si counter defs) shadowEnv
       -- _ <- liftIO $ putStrLn $ show ins
       -- _ <- liftIO $ putStrLn $ show localEnv
       -- _ <- liftIO $ putStrLn $ show listExpr
@@ -490,10 +511,15 @@ exprToInstrs expr si counter defs =
             [IMov (Reg RSP) (RegOffset (-16) RSP)]
       pure headerIns
 
+checkStackAligment :: Int -> Int
+checkStackAligment si = 
+  if (si * 8 `mod` 16 == 0) then si else checkStackAligment (si + 1)
+
 compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv -> [Def] -> IO [[Instruction]]
 compileLetBody exprs si counter localEnv defs =
   foldl
     ( \a b -> do
+        -- _ <- putStrLn (show localEnv)
         c <- a
         d <- evalStateT (exprToInstrs b si counter defs) localEnv
         return $ d : c
@@ -518,8 +544,9 @@ compileEAppParams list si counter defs currentVarEnv =
 compileLetExpr :: [(String, Expr)] -> StackIndex -> Counter -> [Def] -> Eval ([Instruction], StackIndex)
 compileLetExpr list si counter defs =
   foldM
-    ( \(acc, si') (x, value) ->
-        let vInstIO = runStateT (exprToInstrs value si' counter defs) []
+    ( \(acc, si') (x, value) -> do
+        lEv <- get
+        let vInstIO = runStateT (exprToInstrs value si' counter defs) lEv
             store = IMov (stackloc si') (Reg RAX)
          in do
               (vIns, ev) <- liftIO vInstIO
@@ -536,7 +563,7 @@ compileDef counter defs (DFun name args _ body) =
       = mapAccumL (\acc (argName, _) -> (acc+1, (argName, acc) )) 2 args -- (zip ([0..1]::[Int]) args)
     compiledBody = compileLetBody body localSi counter localVarEnv defs  
     compiledFunction = (\b -> [ILabel name] ++ concat (reverse b) ++ [IRet] ) <$> compiledBody 
-  in compiledFunction
+   in compiledFunction
 
 
 buildDefEnv :: [Def] -> DefTypEnv
@@ -550,8 +577,8 @@ compile prog = do
         " section .text\n\
           \extern error\n\
           \extern error_non_number\n\
+          \extern print\n\
           \global our_code_starts_here\n"
-      -- expr = sexpToExpr main
       result = do
         (ExprValidated validProg@(validDefs, validMain)) <- check prog
         let defEnv = buildDefEnv validDefs
@@ -563,7 +590,7 @@ compile prog = do
               \push rbx\n\
                \mov [rsp - 8], rdi" ++
               toAsm compiledMain ++ "\n pop rbx\nret\n"
-        let postlude = [] --TODO how should end the defs definition???
+        let postlude = []
         let asAssemblyString = toAsm (compiledDefs ++ postlude) 
         return (kickoff, asAssemblyString)
    in do

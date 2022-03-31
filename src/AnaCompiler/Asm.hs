@@ -93,7 +93,7 @@ iToAsm ins =
     IRet -> "       ret\n"
     ILabel name -> name ++ ":"
     IPush arg -> printf " push %s" (argToAsm arg)
-    IPop arg -> undefined
+    IPop arg -> printf " pop %s" (argToAsm arg)
     ICall str -> printf " call %s" str
     ICmp left right -> printf " cmp %s, %s" (argToAsm left) (argToAsm right)
     IJne label -> printf " jne near %s" label

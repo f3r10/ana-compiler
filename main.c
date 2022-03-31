@@ -12,20 +12,23 @@
 extern int64_t our_code_starts_here(int64_t input_val) asm("our_code_starts_here");
 extern void error(int64_t val) asm("error");
 extern void error_non_number(int64_t val) asm("error_non_number");
+extern int64_t print(int64_t val) asm("print");
 
 int64_t print(int64_t val) {
-  // FILL IN YOUR CODE FROM HERE
   if ((val & 1) == 1) {
     if (BOA_MIN > val || val > BOA_MAX) {
       fprintf(stderr, "overflow");
       exit(1);
     } else {
       printf("%lld\n", val >> 1);
+      return val;
     }
   } else if (val == FALSE) {
     printf("false\n");
+    return val;
   } else if (val == TRUE) {
     printf("true\n");
+    return val;
   } else {
     fprintf(stderr, "Unknown value: %lld\n", val);
     exit(1);

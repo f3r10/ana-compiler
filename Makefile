@@ -21,5 +21,5 @@ compile: src/*
 %.o: %.s
 	nasm -f elf64 -o $@ $<
 
-%.s: %.int compile
+%.s: %.ana compile
 	./compile $< > $@
