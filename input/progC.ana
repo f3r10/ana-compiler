@@ -1,0 +1,4 @@
+(let ((a 3) (b 2) (orig (+ a 1)))
+  (while (> a 0)
+  (print (* (- 4 a) b))
+  (set a (- a 1))))

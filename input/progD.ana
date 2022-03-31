@@ -1,0 +1,13 @@
+(def even (n : Num) : Bool
+  (if (== n 0) true (odd (- n 1))))
+
+(def odd (n : Num) : Bool
+  (if (== n 0) false (even (- n 1))))
+
+(def test () : Bool
+  (print (even 30))
+  (print (odd 30))
+  (print (even 57))
+  (print (odd 57)))
+
+(test)

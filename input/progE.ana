@@ -1,0 +1,17 @@
+(def manhattan (x1 : Num y1 : Num x2 : Num y2 : Num) : Num
+  (+ (absDef (- x1 x2)) (absDef (- y1 y2))))
+
+(def absDef (a : Num) : Num
+  (if (< a 0) (* a -1) a))
+
+(def printmultiples (a : Num b : Num) : Bool
+  (let ((orig (+ a 1)))
+  (while (> a 0)
+  (print (* (- orig a) b))
+  (set a (- a 1)))))
+
+(let ((ignore 0))
+  (print (absDef -3))
+  (print (manhattan 0 0 3 4))
+  (print (manhattan 3 4 0 0))
+  (printmultiples 3 2))

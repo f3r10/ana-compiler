@@ -1,0 +1,11 @@
+(def sum (a : Num b : Num) : Num (+ a b))
+
+(def check (c : Bool t : Num e : Num) : Num (if c (sum t e) e))
+
+(def superMethod (a : Bool b : Num c : Num d : Num) : Num 
+  (let ((res (sum b c)))
+    (print res)
+    (set res (check a res (sum c d)))
+    res))
+
+(superMethod false 1 2 3)

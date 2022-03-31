@@ -1,2 +1,0 @@
-(def fun (n : Num) : Num (+ n 1))
-(let ((x 10)) (let ((z (fun x))) (+ 3 z)))

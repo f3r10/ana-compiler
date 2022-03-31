@@ -1,0 +1,11 @@
+(def reminder (a : Num b : Num) : Num
+ (if (< a b) a (reminder (- a b) b)))
+
+(def test () : Bool
+  (print (== (reminder 5 2) 1))
+  (print (== (reminder 4 2) 0))
+  (print (== (reminder 4 4) 0))
+  (print (== (reminder 2 4) 2))
+  (print (== (reminder 1345 45) 40)))
+
+(test)

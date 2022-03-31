@@ -1,0 +1,7 @@
+(def printmultiples (a : Num b : Num) : Bool
+  (let ((orig (+ a 1)))
+    (while (> a 0)
+    (print (* (- orig a) b))
+    (set a (- a 1)))))
+
+(printmultiples 3 2)

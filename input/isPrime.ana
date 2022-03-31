@@ -1,0 +1,13 @@
+(def reminder (a : Num b : Num) : Num
+ (if (< a b) a (reminder (- a b) b)))
+
+(def isPrime (a : Num) : Bool
+  (let ((orig 2) (result true))
+    (while (< orig a)
+      (if (== (reminder a orig) 0) 
+        (set result false)
+        true)
+      (set orig (+ orig 1)))
+    result))
+
+(isPrime 97)

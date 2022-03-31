@@ -4,7 +4,7 @@
 module Tests.Unit (main, spec) where
 
 import AnaCompiler.Compile (AnaCompilerException (AnaCompilerException), compile)
-import AnaCompiler.Parser (Sexp (Atom, List))
+import AnaCompiler.Parser (Sexp (Atom, List), parseProgram)
 import qualified AnaCompiler.Parser as Parser
 import qualified Data.Text as T
 import GHC.IO.Exception (ExitCode (ExitSuccess))
@@ -18,9 +18,15 @@ import Text.Printf (printf)
 
 type Program = String
 
+test_file :: String -> String -> [String] -> IO T.Text
+test_file testName fileName args = do 
+  content <- readFile ("input/" ++ fileName)
+  test_run content testName args
+
+
 test_run :: Program -> String -> [String] -> IO T.Text
 test_run program name args =
-  let prog = Parser.parseProgram $ Parser.stringToSexp program
+  let prog = Parser.parseProgram $ Parser.stringToSexp (T.unpack (T.strip . T.pack $ program))
       result = compile prog
       name_s = printf "output/%s.s" name
       name_o = printf "output/%s.o" name
@@ -188,6 +194,12 @@ spec = do
       let prog = Parser.parseProgram $ Parser.stringToSexp "(if true false (+ 3 2))"
           result = compile prog
        in result `shouldThrow` (== AnaCompilerException ["Type mismatch: if branches must agree on type"])
+    it "print input" $ do
+      a <- test_file "print_input_test" "print.ana" ["5"]
+      shouldBe a "5\n5"
+    it "fibbonaci function" $ do
+      a <- test_file "fibbonaci_function_test" "fib.ana" ["15"]
+      shouldBe a "610"
     it "property" $
       property $
         \() -> () === ()
