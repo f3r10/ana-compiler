@@ -11,6 +11,7 @@ data Prim1
   | Sub1
   | IsNum
   | IsBool
+  | Print
   deriving (Show)
 
 data Prim2 
