@@ -291,8 +291,8 @@ makeLabel label counter = do
   c <- counter 1
   return $ printf "%s_%s" label (show c)
 
-exprToInstrs :: Expr -> StackIndex -> Counter -> [Def] -> Eval [Instruction]
-exprToInstrs expr si counter defs =
+exprToInstrs :: Expr -> StackIndex -> Counter -> Bool -> [Def] -> Eval [Instruction]
+exprToInstrs expr si counter isTailPosition defs =
   case expr of
     EId x -> do
       s <- get
@@ -306,8 +306,8 @@ exprToInstrs expr si counter defs =
         then pure [IMov (Reg RAX) (Const constTrue)]
         else pure [IMov (Reg RAX) (Const constFalse)]
     EPrim2 prim exp1 exp2 ->
-      let exp1InsIO = exprToInstrs exp1 si counter defs
-          exp2InsIO = exprToInstrs exp2 (si + 1) counter defs
+      let exp1InsIO = exprToInstrs exp1 si counter False defs
+          exp2InsIO = exprToInstrs exp2 (si + 1) counter False defs
           opForNumIO = do
             exp1Ins <- exp1InsIO
             exp2Ins <- exp2InsIO
@@ -380,9 +380,9 @@ exprToInstrs expr si counter defs =
                     ++ [ILabel endCmpBranchLabel]
        in final_op
     EIf e1 e2 e3 ->
-      let e1isIO = exprToInstrs e1 si counter defs
-          e2isIO = exprToInstrs e2 (si + 1) counter defs -- TODO  this env keeps record of let variables. Is valid to repeat let variables inside blocks?
-          e3isIO = exprToInstrs e3 (si + 2) counter defs
+      let e1isIO = exprToInstrs e1 si counter False defs
+          e2isIO = exprToInstrs e2 (si + 1) counter isTailPosition defs -- TODO  this env keeps record of let variables. Is valid to repeat let variables inside blocks?
+          e3isIO = exprToInstrs e3 (si + 2) counter isTailPosition defs
           op = do
             e1is <- e1isIO
             e2is <- e2isIO
@@ -400,7 +400,7 @@ exprToInstrs expr si counter defs =
                 ++ [ILabel endIfLabel]
        in op
     EPrim1 prim1 exp1 ->
-      let expInsIO = exprToInstrs exp1 si counter defs
+      let expInsIO = exprToInstrs exp1 si counter False defs
           opForNumIO = do
             expIns <- expInsIO
             return $
@@ -453,11 +453,11 @@ exprToInstrs expr si counter defs =
                 [IAdd (Reg RSP) (Const (stackAlignment * 8))]
        in finalOp
     EWhile cond bodyExprs ->
-      let condInsIO = exprToInstrs cond si counter defs
+      let condInsIO = exprToInstrs cond si counter False defs
           opForNumIO = do
             condIns <- condInsIO
             env <- get
-            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env defs
+            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env False defs
             startBranchLabel <- liftIO $ makeLabel "start" counter
             endBranchLabel <- liftIO $ makeLabel "end" counter
             return $
@@ -471,7 +471,7 @@ exprToInstrs expr si counter defs =
        in opForNumIO
     ESet name e -> do
       s <- get
-      exprIO <- exprToInstrs e si counter defs
+      exprIO <- exprToInstrs e si counter False defs
       let updateVariable = case lookup name s of
             Nothing -> []
             Just i ->
@@ -493,7 +493,7 @@ exprToInstrs expr si counter defs =
       -- _ <- liftIO $ putStrLn $ show ins
       -- _ <- liftIO $ putStrLn $ show localEnv
       -- _ <- liftIO $ putStrLn $ show listExpr
-      b_is <- liftIO $ compileLetBody listExpr si' counter localEnv defs
+      b_is <- liftIO $ compileLetBody listExpr si' counter localEnv isTailPosition defs
       -- _ <- liftIO $ putStrLn $ show (reverse b_is)
       return $ ins ++ concat (reverse b_is)
     EApp nameDef listParams -> do
@@ -501,6 +501,13 @@ exprToInstrs expr si counter defs =
       afterCallLabel <- liftIO $ makeLabel "after_call" counter
       (paramsIns, _) <- liftIO $ compileEAppParams listParams (si+2) counter defs currentVarEnv 
       let headerIns = 
+            if isTailPosition then
+              paramsIns ++
+              [ILabel ";start tail call -> overwrite args"] ++
+              reverse (foldl (\acc i -> 
+                [IMov (stackloc (i+1)) (Reg RAX), IMov (Reg RAX) (stackloc (si+1+i))] ++ acc ) [] [1.. (length listParams)]) ++
+              [IJmp nameDef]
+            else
             IMov (Reg RBX) (Label afterCallLabel) :
             [IMov (stackloc si) (Reg RBX)] ++
             [IMov (stackloc (si+1)) (Reg RSP)] ++ 
@@ -515,13 +522,13 @@ checkStackAligment :: Int -> Int
 checkStackAligment si = 
   if (si * 8 `mod` 16 == 0) then si else checkStackAligment (si + 1)
 
-compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv -> [Def] -> IO [[Instruction]]
-compileLetBody exprs si counter localEnv defs =
+compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv -> Bool -> [Def] -> IO [[Instruction]]
+compileLetBody exprs si counter localEnv isTailPosition defs =
   foldl
     ( \a b -> do
         -- _ <- putStrLn (show localEnv)
         c <- a
-        d <- evalStateT (exprToInstrs b si counter defs) localEnv
+        d <- evalStateT (exprToInstrs b si counter isTailPosition defs) localEnv
         return $ d : c
     )
     (pure [])
@@ -532,7 +539,7 @@ compileEAppParams :: [Expr] -> StackIndex -> Counter -> [Def] -> TEnv -> IO ([In
 compileEAppParams list si counter defs currentVarEnv =
   foldM
     ( \(acc, si') expr ->
-        let vInstIO = evalStateT (exprToInstrs expr si' counter defs) currentVarEnv
+        let vInstIO = evalStateT (exprToInstrs expr si' counter False defs) currentVarEnv
             store = IMov (stackloc si') (Reg RAX)
          in do
            vIns <- vInstIO
@@ -546,7 +553,7 @@ compileLetExpr list si counter defs =
   foldM
     ( \(acc, si') (x, value) -> do
         lEv <- get
-        let vInstIO = runStateT (exprToInstrs value si' counter defs) lEv
+        let vInstIO = runStateT (exprToInstrs value si' counter False defs) lEv
             store = IMov (stackloc si') (Reg RAX)
          in do
               (vIns, ev) <- liftIO vInstIO
@@ -561,7 +568,7 @@ compileDef counter defs (DFun name args _ body) =
   let
     (localSi, localVarEnv) 
       = mapAccumL (\acc (argName, _) -> (acc+1, (argName, acc) )) 2 args -- (zip ([0..1]::[Int]) args)
-    compiledBody = compileLetBody body localSi counter localVarEnv defs  
+    compiledBody = compileLetBody body localSi counter localVarEnv True defs  
     compiledFunction = (\b -> [ILabel name] ++ concat (reverse b) ++ [IRet] ) <$> compiledBody 
    in compiledFunction
 
@@ -584,7 +591,7 @@ compile prog = do
         let defEnv = buildDefEnv validDefs
         _ <- calcProgTyp validProg [("input", TNum)] defEnv
         compiledDefs <- concat <$> mapM (compileDef counter validDefs) validDefs
-        compiledMain <- evalStateT (exprToInstrs validMain 2 counter validDefs) [("input", 1)]
+        compiledMain <- evalStateT (exprToInstrs validMain 2 counter False validDefs) [("input", 1)]
         let kickoff = 
               "our_code_starts_here:\n\
               \push rbx\n\

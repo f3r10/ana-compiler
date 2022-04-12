@@ -200,6 +200,12 @@ spec = do
     it "fibbonaci function" $ do
       a <- test_file "fibbonaci_function_test" "fib.ana" ["15"]
       shouldBe a "610"
+    it "sum-non-tail-recursive" $ do
+      a <- test_file "sum-non-tail-recursive" "sum-non-tail-recursive.ana" ["400"]
+      shouldBe a "80201"
+    it "sum-tail-recursive" $ do
+      a <- test_file "sum-tail-recursive" "sum-tail-recursive.ana" ["400"]
+      shouldBe a "80201"
     it "property" $
       property $
         \() -> () === ()
