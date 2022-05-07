@@ -14,6 +14,7 @@ data Reg
   | RBX
   | RSP -- the stack pointer
   | RDI -- the first function argument goes here
+  | RCX
   deriving (Show)
 
 data Size
@@ -63,13 +64,20 @@ rToAsm r =
     RSP -> "rsp"
     RDI -> "rdi"
     RBX -> "rbx"
+    RCX -> "rcx"
 
 argToAsm :: Arg -> String
 argToAsm arg =
   case arg of
     Const n -> show n
     Reg r -> rToAsm r
-    RegOffset n reg -> printf "[%s %s]" (rToAsm reg) (show n)
+    RegOffset n reg -> 
+      if n > 0 then
+        printf "[%s +%s]" (rToAsm reg) (show n)
+      else if n == 0 then
+        printf "[%s]" (rToAsm reg)
+      else
+        printf "[%s %s]" (rToAsm reg) (show n)
     Size size reg ->
       case size of
         DWORD_PTR -> printf "DWORD %s" (argToAsm reg)

@@ -33,6 +33,7 @@ data Expr
   | EPrim1 Prim1 Expr
   | EPrim2 Prim2 Expr Expr
   | EBool Bool
+  | EPair Expr Expr 
   | EApp String [Expr]
   deriving (Show)
 
@@ -47,6 +48,7 @@ type DefTypEnv = [(String, (Typ, TypEnv))]
 data Typ
   = TNum
   | TBool
+  | TPair Typ
   deriving (Eq, Show)
 
 data Def = 

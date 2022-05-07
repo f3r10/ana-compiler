@@ -2,12 +2,12 @@
 
 module AnaCompiler.Compile (compile, AnaCompilerException (..), calcTyp, check, TypValidated(..), buildDefEnv, calcProgTyp) where
 
-import AnaCompiler.Asm (Arg (Const, Reg, RegOffset, Label, Size), Instruction (..), Reg (RAX, RDI, RSP, RBX), toAsm, Size (DWORD_PTR, WORD_PTR))
+import AnaCompiler.Asm (Arg (Const, Reg, RegOffset, Label, Size), Instruction (..), Reg (RAX, RDI, RSP, RBX, RCX), toAsm, Size (DWORD_PTR, WORD_PTR))
 import AnaCompiler.Expr
 import AnaCompiler.Parser (Sexp, sexpToExpr)
 import Control.Exception (Exception, throw)
 import Control.Monad.State.Lazy
-import Data.Bits (Bits (setBit, shiftL))
+import Data.Bits (Bits (setBit, shiftL, shift))
 import Data.IORef
 import Data.Validation
 import Text.Printf (printf)
@@ -16,9 +16,9 @@ import Data.List
 stackloc :: Int -> Arg
 stackloc i = RegOffset (-8 * i) RSP
 
-constTrue = 0x0000000000000002
+constTrue = 0xFFFFFFFF
 
-constFalse = 0x0000000000000000
+constFalse = 0x7FFFFFFF
 
 type Eval a = StateT TEnv IO a
 
@@ -70,7 +70,7 @@ checkTNumType expr typEnv defTypEnv = do
   TypValidated tpy <- calcTyp expr typEnv defTypEnv
   case tpy of
     TNum -> pure $ TypValidated TNum
-    TBool -> throw $ AnaCompilerException ["Type mismatch: op must take a number as an argument"]
+    _ -> throw $ AnaCompilerException ["Type mismatch: op must take a number as an argument"]
 
 calcTyp :: Expr -> TypEnv -> DefTypEnv -> IO TypValidated
 calcTyp  expr typEnv defTypEnv =
@@ -92,7 +92,7 @@ calcTyp  expr typEnv defTypEnv =
       TypValidated tpy <- calcTyp cond typEnv defTypEnv
       case tpy of
         TBool -> pure $ TypValidated TBool --head $ foldl (\acc e -> calcTyp e typEnv : acc) [] body
-        TNum -> throw $ AnaCompilerException ["Type mismatch: while condition must take a bool as an argument"]
+        _ -> throw $ AnaCompilerException ["Type mismatch: while condition must take a bool as an argument"]
     ESet _ e -> calcTyp e typEnv defTypEnv 
     ELet bindList bodyList ->
       let localTypEnvIO =
@@ -112,13 +112,13 @@ calcTyp  expr typEnv defTypEnv =
     EIf condExpr thnExpr elsExpr -> do
       TypValidated tpy <- calcTyp condExpr typEnv defTypEnv
       case tpy of
-        TNum -> throw $ AnaCompilerException ["Type mismatch: if expects a boolean in conditional position"]
         TBool -> do
           TypValidated thnExprType <- calcTyp thnExpr typEnv defTypEnv
           TypValidated elsExprType <- calcTyp elsExpr typEnv defTypEnv
           if thnExprType == elsExprType
             then pure $ TypValidated thnExprType
             else throw $ AnaCompilerException ["Type mismatch: if branches must agree on type"]
+        _ -> throw $ AnaCompilerException ["Type mismatch: if expects a boolean in conditional position"]
     EPrim2 op e1 e2 ->
       case op of
         Plus -> checkTNumType e1 typEnv defTypEnv *> checkTNumType e2 typEnv defTypEnv
@@ -132,6 +132,12 @@ calcTyp  expr typEnv defTypEnv =
           if e1Type == e2Type
             then pure $ TypValidated TBool
             else throw $ AnaCompilerException ["Type mismatch: equal sides must agree on type"]
+    EPair exp1 exp2 -> do
+          TypValidated headPair <- calcTyp exp1 typEnv defTypEnv
+          TypValidated tailPair  <- calcTyp exp2 typEnv defTypEnv
+          if headPair == tailPair
+            then pure $ TypValidated (TPair tailPair)
+            else throw $ AnaCompilerException ["Type mismatch: pair elements must agree on type"]
     EApp name listParams -> 
       case lookup name defTypEnv of
         Just (typ, args) ->
@@ -222,6 +228,7 @@ wellFormedE defs expr env =
        in c2 --error ("env: " ++ show env ++ "\n list: " ++ show list ++ "\n shadowEnv: " ++ show shadowEnv)
     EIf exp1 exp2 exp3 ->
       wellFormedE defs exp1 env *> wellFormedE defs exp2 env *> wellFormedE defs exp3 env
+    EPair exp1 exp2 -> wellFormedE defs exp1 env *> wellFormedE defs exp2 env
     EApp nameDef listParams ->
       case findDef defs nameDef of
         Just (DFun _ args _ _) -> 
@@ -300,7 +307,7 @@ exprToInstrs expr si counter isTailPosition defs =
             Nothing -> []
             Just i -> [IMov (Reg RAX) (stackloc i)]
        in pure a
-    ENum n -> pure [IMov (Reg RAX) (Const (n * 2 + 1 {- (Const (setBit (shiftL n 1) 0)) -}))]
+    ENum n -> pure [IMov (Reg RAX) (Const (shift n 1) )]
     EBool f ->
       if f
         then pure [IMov (Reg RAX) (Const constTrue)]
@@ -321,20 +328,20 @@ exprToInstrs expr si counter isTailPosition defs =
             case prim of
               Plus -> do
                 op <- opForNumIO
-                return $ op ++ IAdd (Reg RAX) (stackloc $ si + 1) : [ISub (Reg RAX) (Const 1)]
+                return $ op ++ [IAdd (Reg RAX) (stackloc $ si + 1)] -- : [ISub (Reg RAX) (Const 1)]
               Minus -> do
                 op <- opForNumIO
-                return $ op ++ ISub (Reg RAX) (stackloc $ si + 1) : [IAdd (Reg RAX) (Const 1)]
+                return $ op ++ [ISub (Reg RAX) (stackloc $ si + 1)] -- : [IAdd (Reg RAX) (Const 1)]
               Times -> do
                 op <- opForNumIO
                 return $
                   op
                     ++ [IXor (Reg RAX) (Const 1)]
                     ++ [ISar (Reg RAX) (Const 1)]
-                    ++ [IMov (stackloc si) (Reg RAX)]
+                    -- ++ [IMov (stackloc si) (Reg RAX)] It is not necessary to replace this value. It is only used for this operation
                     ++ [IMul (Reg RAX) (stackloc $ si + 1)]
-                    ++ [ISub (Reg RAX) (stackloc si)]
-                    ++ [IXor (Reg RAX) (Const 1)]
+                    -- ++ [ISub (Reg RAX) (stackloc si)]
+                    -- ++ [IXor (Reg RAX) (Const 1)]
               Equal -> do
                 exp1Ins <- exp1InsIO
                 exp2Ins <- exp2InsIO
@@ -496,6 +503,21 @@ exprToInstrs expr si counter isTailPosition defs =
       b_is <- liftIO $ compileLetBody listExpr si' counter localEnv isTailPosition defs
       -- _ <- liftIO $ putStrLn $ show (reverse b_is)
       return $ ins ++ concat (reverse b_is)
+    EPair exp1 exp2 -> 
+      let e1isIO = exprToInstrs exp1 si counter False defs
+          e2isIO = exprToInstrs exp2 (si + 1) counter False defs 
+          op = do
+            e1is <- e1isIO
+            e2is <- e2isIO
+            return $
+              e1is
+                ++ [IMov (RegOffset 0 RCX) (Reg RAX)]
+                ++ e2is
+                ++ [IMov (RegOffset 8 RCX) (Reg RAX)]
+                ++ [IMov (Reg RAX) (Reg RCX)]
+                ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
+                ++ [IAdd (Reg RCX) (Const 16)]
+       in op
     EApp nameDef listParams -> do
       currentVarEnv <- get
       afterCallLabel <- liftIO $ makeLabel "after_call" counter
@@ -595,7 +617,7 @@ compile prog = do
         let kickoff = 
               "our_code_starts_here:\n\
               \push rbx\n\
-               \mov [rsp - 8], rdi" ++
+               \mov rcx, rdi" ++
               toAsm compiledMain ++ "\n pop rbx\nret\n"
         let postlude = []
         let asAssemblyString = toAsm (compiledDefs ++ postlude) 

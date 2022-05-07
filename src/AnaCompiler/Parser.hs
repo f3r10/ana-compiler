@@ -150,6 +150,7 @@ sexpToExpr (List sexps) =
               []
               listLetBody
        in ELet (reverse la) (reverse l2)
+    [Atom "cons", ex1, ex2] -> EPair (sexpToExpr ex1) (sexpToExpr ex2) 
     [Atom nameFun, listParams] -> EApp nameFun [sexpToExpr listParams]
     Atom nameFun : rest -> EApp nameFun (reverse $ foldl (\acc ex -> sexpToExpr ex : acc) [] rest) 
     -- [Atom s] -> stringToExpr s

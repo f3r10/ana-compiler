@@ -28,5 +28,7 @@ main =
            result = compile prog
            in
             result >>= putStrLn
+            -- typ >>= print
+            -- print prog
         _ -> error "There is not present a program to compile"
 
