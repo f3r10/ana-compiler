@@ -138,6 +138,16 @@ calcTyp  expr typEnv defTypEnv =
           if headPair == tailPair
             then pure $ TypValidated (TPair tailPair)
             else throw $ AnaCompilerException ["Type mismatch: pair elements must agree on type"]
+    EFst name ->
+      case lookup name typEnv of
+        Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" name]
+        Just (TPair typ) -> pure $ TypValidated typ
+        Just _ -> pure $ throw $ AnaCompilerException [printf "Type mismatch: unknown pair %s type" name]
+    ESnd name ->
+      case lookup name typEnv of
+        Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" name]
+        Just (TPair typ) -> pure $ TypValidated typ
+        Just _ -> pure $ throw $ AnaCompilerException [printf "Type mismatch: unknown pair %s type" name]
     EApp name listParams -> 
       case lookup name defTypEnv of
         Just (typ, args) ->
@@ -229,6 +239,14 @@ wellFormedE defs expr env =
     EIf exp1 exp2 exp3 ->
       wellFormedE defs exp1 env *> wellFormedE defs exp2 env *> wellFormedE defs exp3 env
     EPair exp1 exp2 -> wellFormedE defs exp1 env *> wellFormedE defs exp2 env
+    EFst name ->
+      case lookup name env of
+        Nothing -> Failure $ Error [printf "variable identifier %s unbound" name]
+        Just _ -> Success ()
+    ESnd name ->
+      case lookup name env of
+        Nothing -> Failure $ Error [printf "variable identifier %s unbound" name]
+        Just _ -> Success ()
     EApp nameDef listParams ->
       case findDef defs nameDef of
         Just (DFun _ args _ _) -> 
@@ -518,6 +536,26 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
                 ++ [IAdd (Reg RCX) (Const 16)]
        in op
+    EFst name -> do
+      s <- get
+      let a = case lookup name s of
+            Nothing -> []
+            Just e ->
+              --TODO check that e is a pointer 
+              [IMov (Reg RAX) (stackloc e)]
+                ++ [ISub (Reg RAX) (Const 1)] -- UNTAGGING
+                ++ [IMov (Reg RAX) (RegOffset 0 RAX)]
+       in pure a
+    ESnd name -> do
+      s <- get
+      let a = case lookup name s of
+            Nothing -> []
+            Just e ->
+              --TODO check that e is a pointer 
+              [IMov (Reg RAX) (stackloc e)]
+                ++ [ISub (Reg RAX) (Const 1)] -- UNTAGGING
+                ++ [IMov (Reg RAX) (RegOffset 8 RAX)]
+       in pure a
     EApp nameDef listParams -> do
       currentVarEnv <- get
       afterCallLabel <- liftIO $ makeLabel "after_call" counter

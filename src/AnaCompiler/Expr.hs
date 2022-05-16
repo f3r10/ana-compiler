@@ -34,6 +34,8 @@ data Expr
   | EPrim2 Prim2 Expr Expr
   | EBool Bool
   | EPair Expr Expr 
+  | EFst String
+  | ESnd String
   | EApp String [Expr]
   deriving (Show)
 

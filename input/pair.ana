@@ -1,1 +1,1 @@
-(let ((b 3) (a (cons b 2))) a)
+(let ((b 3) (a (cons -1 b)) (c (cons 9 8))) (+ (fst a) (* (snd a) (snd c))))
