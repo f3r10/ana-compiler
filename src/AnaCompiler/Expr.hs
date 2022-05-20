@@ -33,9 +33,10 @@ data Expr
   | EPrim1 Prim1 Expr
   | EPrim2 Prim2 Expr Expr
   | EBool Bool
-  | EPair Expr Expr 
-  | EFst String
-  | ESnd String
+  | ETuple Expr Expr 
+  | EHead String
+  | ETail String
+  | ENil Typ
   | EApp String [Expr]
   deriving (Show)
 

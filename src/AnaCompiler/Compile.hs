@@ -2,7 +2,7 @@
 
 module AnaCompiler.Compile (compile, AnaCompilerException (..), calcTyp, check, TypValidated(..), buildDefEnv, calcProgTyp) where
 
-import AnaCompiler.Asm (Arg (Const, Reg, RegOffset, Label, Size), Instruction (..), Reg (RAX, RDI, RSP, RBX, RCX), toAsm, Size (DWORD_PTR, WORD_PTR))
+import AnaCompiler.Asm (Arg (Const, Reg, RegOffset, Label, Size), Instruction (..), Reg (RAX, RDI, RSP, RBX, RCX, R10), toAsm, Size (DWORD_PTR, WORD_PTR))
 import AnaCompiler.Expr
 import AnaCompiler.Parser (Sexp, sexpToExpr)
 import Control.Exception (Exception, throw)
@@ -19,6 +19,8 @@ stackloc i = RegOffset (-8 * i) RSP
 constTrue = 0xFFFFFFFF
 
 constFalse = 0x7FFFFFFF
+
+constNull = 0x00000000
 
 type Eval a = StateT TEnv IO a
 
@@ -132,18 +134,22 @@ calcTyp  expr typEnv defTypEnv =
           if e1Type == e2Type
             then pure $ TypValidated TBool
             else throw $ AnaCompilerException ["Type mismatch: equal sides must agree on type"]
-    EPair exp1 exp2 -> do
+    ENil typ -> pure $ TypValidated typ
+    ETuple exp1 exp2 -> do
           TypValidated headPair <- calcTyp exp1 typEnv defTypEnv
           TypValidated tailPair  <- calcTyp exp2 typEnv defTypEnv
-          if headPair == tailPair
-            then pure $ TypValidated (TPair tailPair)
+          let a = case tailPair of
+                    (TPair tailTyp) -> tailTyp
+                    _ -> tailPair 
+          if headPair == a
+            then pure $ TypValidated (TPair a)
             else throw $ AnaCompilerException ["Type mismatch: pair elements must agree on type"]
-    EFst name ->
+    EHead name ->
       case lookup name typEnv of
         Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" name]
         Just (TPair typ) -> pure $ TypValidated typ
         Just _ -> pure $ throw $ AnaCompilerException [printf "Type mismatch: unknown pair %s type" name]
-    ESnd name ->
+    ETail name ->
       case lookup name typEnv of
         Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" name]
         Just (TPair typ) -> pure $ TypValidated typ
@@ -238,12 +244,18 @@ wellFormedE defs expr env =
        in c2 --error ("env: " ++ show env ++ "\n list: " ++ show list ++ "\n shadowEnv: " ++ show shadowEnv)
     EIf exp1 exp2 exp3 ->
       wellFormedE defs exp1 env *> wellFormedE defs exp2 env *> wellFormedE defs exp3 env
-    EPair exp1 exp2 -> wellFormedE defs exp1 env *> wellFormedE defs exp2 env
-    EFst name ->
+    ENil typ -> Success()
+    ETuple exp1 exp2 -> 
+      wellFormedE defs exp1 env *> 
+        case exp2 of
+          ETuple _ _ -> wellFormedE defs exp2 env
+          ENil _ -> Success ()
+          _ -> Failure $ Error [printf "Invalid tuple form: %s " (show exp2)]
+    EHead name ->
       case lookup name env of
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" name]
         Just _ -> Success ()
-    ESnd name ->
+    ETail name ->
       case lookup name env of
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" name]
         Just _ -> Success ()
@@ -521,22 +533,29 @@ exprToInstrs expr si counter isTailPosition defs =
       b_is <- liftIO $ compileLetBody listExpr si' counter localEnv isTailPosition defs
       -- _ <- liftIO $ putStrLn $ show (reverse b_is)
       return $ ins ++ concat (reverse b_is)
-    EPair exp1 exp2 -> 
-      let e1isIO = exprToInstrs exp1 si counter False defs
-          e2isIO = exprToInstrs exp2 (si + 1) counter False defs 
+    ENil typ -> pure [IMov (Reg RAX) (Const constNull)]
+    ETuple exp1 exp2 -> 
+      let e1isIO = exprToInstrs exp1 (si + 3) counter False defs
+          e2isIO = exprToInstrs exp2 (si + 4) counter False defs 
           op = do
             e1is <- e1isIO
             e2is <- e2isIO
             return $
-              e1is
+              [ IMov (Reg RAX) (Reg RCX)
+              , IAdd (Reg RCX) (Const 16)
+              , IAdd (Reg RAX) (Const 16)
+              , IMov (stackloc si) (Reg RAX)
+              ]
+                ++ e1is
                 ++ [IMov (RegOffset 0 RCX) (Reg RAX)]
                 ++ e2is
-                ++ [IMov (RegOffset 8 RCX) (Reg RAX)]
-                ++ [IMov (Reg RAX) (Reg RCX)]
+                ++ [IMov (Reg R10) (Reg RAX)]
+                ++ [IMov (Reg RAX) (stackloc si)]
+                ++ [IMov (RegOffset 8 RAX) (Reg R10)]
+                ++ [IMov (Reg RAX) (stackloc si)]
                 ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
-                ++ [IAdd (Reg RCX) (Const 16)]
        in op
-    EFst name -> do
+    EHead name -> do
       s <- get
       let a = case lookup name s of
             Nothing -> []
@@ -546,7 +565,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [ISub (Reg RAX) (Const 1)] -- UNTAGGING
                 ++ [IMov (Reg RAX) (RegOffset 0 RAX)]
        in pure a
-    ESnd name -> do
+    ETail name -> do
       s <- get
       let a = case lookup name s of
             Nothing -> []

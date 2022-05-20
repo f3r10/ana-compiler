@@ -33,6 +33,8 @@ int64_t print(int64_t val) {
   } else if (val == TRUE) {
     printf("true\n");
     return val;
+  } else if (val == 0)  {
+    printf("null\n");
   } else if (isPair(val)) {
     int64_t* valp = (int64_t*) (val - 1);    // extract address  
     printf("(");

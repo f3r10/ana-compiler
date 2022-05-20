@@ -15,6 +15,7 @@ data Reg
   | RSP -- the stack pointer
   | RDI -- the first function argument goes here
   | RCX
+  | R10
   deriving (Show)
 
 data Size
@@ -65,6 +66,7 @@ rToAsm r =
     RDI -> "rdi"
     RBX -> "rbx"
     RCX -> "rcx"
+    R10 -> "r10"
 
 argToAsm :: Arg -> String
 argToAsm arg =

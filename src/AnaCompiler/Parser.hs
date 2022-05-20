@@ -150,9 +150,15 @@ sexpToExpr (List sexps) =
               []
               listLetBody
        in ELet (reverse la) (reverse l2)
-    [Atom "cons", ex1, ex2] -> EPair (sexpToExpr ex1) (sexpToExpr ex2) 
-    [Atom "fst", Atom a] -> EFst a
-    [Atom "snd", Atom a] -> ESnd a
+    [Atom "cons", ex1, ex2] -> ETuple (sexpToExpr ex1) (sexpToExpr ex2) 
+    [Atom "head", Atom a] -> EHead a
+    [Atom "tail", Atom a] -> ETail a
+    [Atom "nil", Atom typ] -> 
+      case typ of
+        "Num" -> ENil TNum
+        "Bool" -> ENil TBool
+        "TPair" -> ENil TNum 
+        unknown -> error $ "Parse failed at Sexp->Expr conversion becuase of unknown type " ++ show unknown
     [Atom nameFun, listParams] -> EApp nameFun [sexpToExpr listParams]
     Atom nameFun : rest -> EApp nameFun (reverse $ foldl (\acc ex -> sexpToExpr ex : acc) [] rest) 
     -- [Atom s] -> stringToExpr s
