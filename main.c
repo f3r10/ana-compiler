@@ -12,6 +12,7 @@
 extern int64_t our_code_starts_here(int64_t input_val) asm("our_code_starts_here");
 extern void error(int64_t val) asm("error");
 extern void error_non_number(int64_t val) asm("error_non_number");
+extern void error_index_out_of_bounds() asm("error_index_out_of_bounds");
 extern int64_t print(int64_t val) asm("print");
 
 int64_t isPair(int64_t p) {
@@ -24,7 +25,7 @@ int64_t print(int64_t val) {
       fprintf(stderr, "overflow");
       exit(1);
     } else {
-      printf("%lld", val >> 1);
+      printf("%lld\n", val >> 1);
       return val;
     }
   } else if (val == FALSE) {
@@ -55,6 +56,10 @@ void error(int64_t error_code) {
 
 void error_non_number(int64_t error_code) {
   fprintf(stderr, "Error: expected a number");
+}
+
+void error_index_out_of_bounds() {
+  fprintf(stderr, "Error: index out of bounds\n");
 }
 
 int main(int argc, char** argv) {

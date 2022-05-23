@@ -1,0 +1,8 @@
+(let ((b 5) (a (vec b 4 3 8 9)) (c (cons (get a 3) (nil Num)))) 
+  (print (+ (head c) (get a 1))) 
+  (print (get a 4))
+  (set a 4 (+ 1 99))
+  (get a 4)
+  (print b)
+  (set b 11)
+  (print b))

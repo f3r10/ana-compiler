@@ -22,7 +22,7 @@ parseProg :: Parser Sexp
 parseProg = parseAtom2 <|> parseIntegers <|> parseVariablesNames <|> parseAtom <|> (sepBy parseList (many1 space) >>= return . List)
 
 parseList :: Parser Sexp
-parseList = between (char '(') (char ')') $ sepBy parseSexp (many1 space) >>= return . List
+parseList = between (char '(') (char ')') $ sepBy parseSexp (many space) >>= return . List
 
 parseSexp :: Parser Sexp
 parseSexp = parseAtom2 <|> parseIntegers <|> parseVariablesNames <|> parseAtom <|> parseList
@@ -112,6 +112,7 @@ sexpToExpr (List sexps) =
     [Atom "false"] -> EBool False
     [Atom "if", e1, e2, e3] -> EIf (sexpToExpr e1) (sexpToExpr e2) (sexpToExpr e3)
     [Atom "set", Atom val, e1] -> ESet val (sexpToExpr e1)
+    [Atom "set", Atom val, Atom item,  e1] -> EVecSet val (read item) (sexpToExpr e1)
     Atom "while" : condExp : listExpr ->
       let body =
             foldl
@@ -150,17 +151,29 @@ sexpToExpr (List sexps) =
               []
               listLetBody
        in ELet (reverse la) (reverse l2)
-    [Atom "cons", ex1, ex2] -> ETuple (sexpToExpr ex1) (sexpToExpr ex2) 
+    [Atom "cons", ex1, ex2] -> ETuple (sexpToExpr ex1) (sexpToExpr ex2)
     [Atom "head", Atom a] -> EHead a
     [Atom "tail", Atom a] -> ETail a
-    [Atom "nil", Atom typ] -> 
+    [Atom "nil", Atom typ] ->
       case typ of
         "Num" -> ENil TNum
         "Bool" -> ENil TBool
-        "TPair" -> ENil TNum 
+        "TPair" -> ENil TNum
         unknown -> error $ "Parse failed at Sexp->Expr conversion becuase of unknown type " ++ show unknown
+    Atom "vec" : listExpr ->
+      let body =
+            foldl
+              ( \a b ->
+                  case b of
+                    simpleAtom@(Atom _) -> sexpToExpr simpleAtom : a
+                    bExp@(List _) -> sexpToExpr bExp : a
+              )
+              []
+              listExpr
+       in EVector body
+    [Atom "get", Atom nameVec, Atom item] -> EGet nameVec (read item)
     [Atom nameFun, listParams] -> EApp nameFun [sexpToExpr listParams]
-    Atom nameFun : rest -> EApp nameFun (reverse $ foldl (\acc ex -> sexpToExpr ex : acc) [] rest) 
+    Atom nameFun : rest -> EApp nameFun (reverse $ foldl (\acc ex -> sexpToExpr ex : acc) [] rest)
     -- [Atom s] -> stringToExpr s
     a -> error $ "Parse failed at Sexp->Expr conversion " ++ show a
 

@@ -29,9 +29,12 @@ data Expr
   | ELet [(String, Expr)] [Expr]
   | EWhile Expr [Expr]
   | ESet String Expr
+  | EVecSet String Int Expr
   | EIf Expr Expr Expr
   | EPrim1 Prim1 Expr
   | EPrim2 Prim2 Expr Expr
+  | EVector [Expr]
+  | EGet String Int
   | EBool Bool
   | ETuple Expr Expr 
   | EHead String

@@ -56,6 +56,7 @@ data Instruction
   | IJl String
   | IJg String
   | IJo String
+  | IJge String
   deriving (Show)
 
 rToAsm :: Reg -> String
@@ -113,6 +114,7 @@ iToAsm ins =
     IJl label -> printf " jl near %s" label
     IJg label -> printf " jg near %s" label
     IJo label -> printf " jo near %s" label
+    IJge label -> printf " jge near %s" label
 
 toAsm :: [Instruction] -> String
 toAsm = foldl (\s i -> printf "%s\n%s" s (iToAsm i)) ""
