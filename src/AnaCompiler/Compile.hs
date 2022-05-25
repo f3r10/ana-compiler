@@ -280,6 +280,10 @@ wellFormedE defs expr env =
         *> case exp2 of
           ETuple _ _ -> wellFormedE defs exp2 env
           ENil _ -> Success ()
+          EId x ->
+            case lookup x env of
+              Nothing -> Failure $ Error [printf "variable identifier %s unbound" x]
+              Just _ -> Success ()
           _ -> Failure $ Error [printf "Invalid tuple form: %s " (show exp2)]
     EHead name ->
       case lookup name env of
@@ -577,6 +581,21 @@ exprToInstrs expr si counter isTailPosition defs =
       -- _ <- liftIO $ putStrLn $ show (reverse b_is)
       return $ ins ++ concat (reverse b_is)
     ENil typ -> pure [IMov (Reg RAX) (Const constNull)]
+    ETuple exp1 (EId x) -> do
+      s <- get
+      e1is <- exprToInstrs exp1 si counter False defs
+      let a = case lookup x s of
+            Nothing -> []
+            Just i ->
+              [IAdd (Reg RCX) (Const 16)]
+                ++ [IMov (Reg RAX) (stackloc i)]
+                ++ [IMov (Reg R10) (Reg RAX)]
+                ++ e1is
+                ++ [IMov (RegOffset 0 RCX) (Reg RAX)]
+                ++ [IMov (RegOffset 8 RCX) (Reg R10)]
+                ++ [IMov (Reg RAX) (Reg RCX)]
+                ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
+       in pure a
     ETuple exp1 exp2 ->
       let e1isIO = exprToInstrs exp1 (si + 3) counter False defs
           e2isIO = exprToInstrs exp2 (si + 4) counter False defs
