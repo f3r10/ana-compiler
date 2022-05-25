@@ -9,7 +9,7 @@
 #define BOA_MIN (- (1L << 62))
 #define BOA_MAX ((1L << 62) - 1)
 
-extern int64_t our_code_starts_here(int64_t input_val) asm("our_code_starts_here");
+extern int64_t our_code_starts_here(int64_t input_val, int64_t heap_pointer) asm("our_code_starts_here");
 extern void error(int64_t val) asm("error");
 extern void error_non_number(int64_t val) asm("error_non_number");
 extern void error_index_out_of_bounds() asm("error_index_out_of_bounds");
@@ -83,13 +83,13 @@ int main(int argc, char** argv) {
       exit(1);
     } else {
       input_val = (int64_t) v;
-      input_val = (input_val << 1) ^ 1;
+      input_val = (input_val << 1);
     }
   }
 
 
   int64_t* HEAP = malloc(8 * 100000);
-  int64_t result = our_code_starts_here(HEAP);
+  int64_t result = our_code_starts_here(input_val, HEAP);
   print(result);
   free(HEAP);
   return 0;
