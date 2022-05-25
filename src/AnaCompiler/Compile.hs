@@ -467,7 +467,7 @@ exprToInstrs expr si counter isTailPosition defs =
             endIfLabel <- liftIO $ makeLabel "end_of_if" counter
             return $
               e1is
-                ++ [ICmp (Reg RAX) (Const 0)]
+                ++ [ICmp (Reg RAX) (Const constFalse)]
                 ++ [IJe elseBranchLabel]
                 ++ e2is
                 ++ [IJmp endIfLabel]
@@ -497,6 +497,7 @@ exprToInstrs expr si counter isTailPosition defs =
               return $
                 expIns
                   ++ [IAnd (Reg RAX) (Const 1)]
+                  ++ [IOr (Reg RAX) (Const 1)]
                   ++ [ICmp (Reg RAX) (Const 1)]
                   ++ [IJne noNumBranchLabel]
                   ++ [IMov (Reg RAX) (Const constTrue)]
@@ -512,7 +513,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 expIns
                   ++ [IAnd (Reg RAX) (Const 1)]
                   ++ [ICmp (Reg RAX) (Const 1)]
-                  ++ [IJe noBoolBranchLabel]
+                  ++ [IJne noBoolBranchLabel]
                   ++ [IMov (Reg RAX) (Const constTrue)]
                   ++ [IJmp endCmpBranchLabel]
                   ++ [ILabel noBoolBranchLabel]
@@ -790,7 +791,8 @@ compile prog = do
         let kickoff =
               "our_code_starts_here:\n\
               \push rbx\n\
-              \mov rcx, rdi"
+              \mov rcx, rsi\n\
+              \mov [rsp - 8], rdi"
                 ++ toAsm compiledMain
                 ++ "\n pop rbx\nret\n"
         let postlude = []
