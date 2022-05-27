@@ -30,6 +30,6 @@ main =
            in
             result >>= putStrLn
             -- typ >>= print
-            -- print main
+            -- print prog
         _ -> error "There is not present a program to compile"
 

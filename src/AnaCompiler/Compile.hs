@@ -86,7 +86,7 @@ checkTNumType expr typEnv defTypEnv typAlias = do
   TypValidated tpy <- calcTyp expr typEnv defTypEnv typAlias
   case tpy of
     TNum -> pure $ TypValidated TNum
-    _ -> throw $ AnaCompilerException ["Type mismatch: op must take a number as an argument"]
+    invalidType -> throw $ AnaCompilerException ["Type mismatch: op must take a number as an argument: " ++ show invalidType]
 
 calcTyp :: Expr -> TypEnv -> DefTypEnv -> TypAliasEnv -> IO TypValidated
 calcTyp expr typEnv defTypEnv typAlias =
@@ -158,14 +158,14 @@ calcTyp expr typEnv defTypEnv typAlias =
     ETuple _ _ finalType -> do
       -- print $ show exp2
       -- TypValidated tailPair <- calcTyp exp2 typEnv defTypEnv typAlias
-      let typResoluction = case finalType of
-            (TName customType) ->
-              case lookup customType typAlias of
-                Just typ -> typ
-                Nothing ->
-                  throw $ AnaCompilerException [printf "Type mismatch: unknown pair %s type" (show customType)]
-            typ -> typ
-      pure $ TypValidated typResoluction
+      -- let typResoluction = case finalType of
+      --       (TName customType) ->
+      --         case lookup customType typAlias of
+      --           Just typ -> typ
+      --           Nothing ->
+      --             throw $ AnaCompilerException [printf "Type mismatch: unknown pair %s type" (show customType)]
+      --       typ -> typ
+      pure $ TypValidated finalType
     -- TypValidated headPair <- calcTyp exp1 typEnv defTypEnv typAlias
     -- TypValidated tailPair <- calcTyp exp2 typEnv defTypEnv typAlias
     -- let a = case tailPair of

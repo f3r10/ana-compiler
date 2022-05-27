@@ -160,9 +160,8 @@ listSexpToExpr sexps =
               Atom _ -> error "a"
               List [Atom "nil", Atom t] ->
                 case t of
-                  "Num" -> TNum
-                  "Bool" -> TBool
-                  "TPair" -> TNum
+                  "Num" -> TTuple TNum
+                  "Bool" -> TTuple TBool
                   customTyp -> TName customTyp
               List listCons ->
                 case listSexpToExpr listCons of
@@ -175,7 +174,6 @@ listSexpToExpr sexps =
       case typ of
         "Num" -> ENil TNum
         "Bool" -> ENil TBool
-        "TPair" -> ENil TNum
         customTyp -> ENil (TName customTyp)
     Atom "vec" : listExpr ->
       let body =
