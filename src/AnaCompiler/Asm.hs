@@ -16,6 +16,7 @@ data Reg
   | RDI -- the first function argument goes here
   | RCX
   | R10
+  | R15
   deriving (Show)
 
 data Size
@@ -68,6 +69,7 @@ rToAsm r =
     RBX -> "rbx"
     RCX -> "rcx"
     R10 -> "r10"
+    R15 -> "r15"
 
 argToAsm :: Arg -> String
 argToAsm arg =

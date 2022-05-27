@@ -2,7 +2,7 @@ module AnaCompiler (main) where
 
 import System.Environment (getArgs)
 import AnaCompiler.Parser
-import AnaCompiler.Compile (compile, calcProgTyp, check, buildDefEnv)
+import AnaCompiler.Compile (compile, calcProgTyp, buildDefEnv, buildTypAliasEnv)
 import qualified Data.Text as T
 
 main :: IO ()
@@ -22,13 +22,14 @@ main =
           content <- readFile input
           let
            sexEps = stringToSexp (T.unpack (T.strip . T.pack $ content))
-           prog = parseProgram sexEps 
-           defEnv = buildDefEnv (fst prog)
-           typ = calcProgTyp prog [] defEnv
+           prog@(defs, typs, main) = parseProgram sexEps 
+           defEnv = buildDefEnv defs
+           typAliasEnv = buildTypAliasEnv typs
+           typ = calcProgTyp prog [] defEnv typAliasEnv
            result = compile prog
            in
             result >>= putStrLn
             -- typ >>= print
-            -- print prog
+            -- print main
         _ -> error "There is not present a program to compile"
 
