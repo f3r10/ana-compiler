@@ -1,0 +1,6 @@
+(type Point (Vec Num))
+
+(def newPoint (p1: (Vec Num) p2: Point): Point
+  (vec (+ (get p1 0) (get p2 1)) 5))
+
+(let ((a (vec 9 8 7 6 5 4))) (newPoint a a))

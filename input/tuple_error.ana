@@ -1,0 +1,1 @@
+(let ((a (cons 10 (cons 2 (cons 5 (cons 6 (nil Num))))))) (+ 1 (tail a)))

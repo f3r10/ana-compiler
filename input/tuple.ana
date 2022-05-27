@@ -1,1 +1,9 @@
-(let ((a (cons 10 (cons 2 (cons 5 (nil Num)))))) (cons 5 a))
+(type Point (Tuple Num))
+
+(def headPoint (n: Point): Num
+  (head n))
+
+(def tailPoint (n: Point): Point
+  (tail n))
+
+(let ((a (cons 10 (cons 2 (cons 5 (cons 6 (nil Point))))))) (print (tailPoint a)) 5)

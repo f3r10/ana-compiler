@@ -1,0 +1,9 @@
+(type Point (Vec Num))
+
+(def makePoint(x: Num y: Num): Point
+ (vec x y))
+
+(def pairOfPoints(a: Point b: Point): Point
+  (vec (+ (get a 0) (get b 0)) (+ (get a 1) (get b 1))))
+
+(let ((a (makePoint 1 2)) (b (makePoint 3 4))) (pairOfPoints a b))
