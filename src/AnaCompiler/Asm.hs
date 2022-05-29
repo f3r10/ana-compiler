@@ -14,8 +14,10 @@ data Reg
   | RBX
   | RSP -- the stack pointer
   | RDI -- the first function argument goes here
+  | RSI
   | RCX
   | R10
+  | R11
   | R15
   deriving (Show)
 
@@ -66,9 +68,11 @@ rToAsm r =
     RAX -> "rax"
     RSP -> "rsp"
     RDI -> "rdi"
+    RSI -> "rsi"
     RBX -> "rbx"
     RCX -> "rcx"
     R10 -> "r10"
+    R11 -> "r11"
     R15 -> "r15"
 
 argToAsm :: Arg -> String
