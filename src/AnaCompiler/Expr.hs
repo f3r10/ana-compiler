@@ -34,6 +34,8 @@ data Expr
   | EPrim1 Prim1 Expr
   | EPrim2 Prim2 Expr Expr
   | EVector [Expr]
+  | EDict [(String, Expr)]
+  | EDictGet String String
   | EGet String Int
   | EBool Bool
   | ETuple Expr Expr Typ
@@ -61,6 +63,7 @@ data Typ
   | TTuple Typ
   | TName String
   | TVec Typ
+  | TDict [(String, Typ)]
   deriving (Eq, Show)
 
 data Def

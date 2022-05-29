@@ -2,17 +2,18 @@
 
 module AnaCompiler.Compile (compile, AnaCompilerException (..), calcTyp, check, TypValidated (..), buildDefEnv, calcProgTyp, buildTypAliasEnv) where
 
-import AnaCompiler.Asm (Arg (Const, Label, Reg, RegOffset), Instruction (..), Reg (R10, R15, RAX, RBX, RCX, RDI, RSP), toAsm)
+import AnaCompiler.Asm (Arg (Const, Label, Reg, RegOffset), Instruction (..), Reg (R10, R15, RAX, RBX, RCX, RDI, RSI, RSP), toAsm)
 import AnaCompiler.Expr
+import AnaCompiler.Utils (lookUp)
 import Control.Exception (Exception, throw)
 import Control.Monad.State.Lazy
 import Data.Bits (Bits (shift))
+import Data.Functor
 import Data.IORef
 import Data.List
 import qualified Data.Maybe
 import Data.Validation
 import Text.Printf (printf)
-import Data.Functor
 
 stackloc :: Int -> Arg
 stackloc i = RegOffset (-8 * i) RSP
@@ -26,7 +27,11 @@ constFalse = 0x7FFFFFFF
 constNull :: Int
 constNull = 0x00000000
 
-type Eval a = StateT TEnv IO a
+type Scope = [(String, TypEnv)]
+
+type Eval a = StateT (TEnv, Scope, String) IO a
+
+type TypState a = StateT (String, TypEnv) IO a
 
 findDef :: [Def] -> String -> Maybe Def
 findDef defs nameToFind =
@@ -54,12 +59,12 @@ newtype TypValidated
 newtype Error = Error {errors :: [String]}
   deriving (Semigroup, Show)
 
-calcDefTyp :: DefTypEnv -> TypAliasEnv -> Def -> IO TypValidated
-calcDefTyp defEnv typAlias (DFun _ args ret body) =
+calcDefTyp :: DefTypEnv -> TypAliasEnv -> Def -> IO (TypValidated, (String, TypEnv))
+calcDefTyp defEnv typAlias (DFun scope args ret body) =
   let lastBodyExpr = last body
       lastBodyExprTyp =
-        calcTyp lastBodyExpr args defEnv typAlias
-          >>= ( \(TypValidated lastExpr) ->
+        runStateT (calcTyp lastBodyExpr defEnv typAlias) (scope, args)
+          >>= ( \(TypValidated lastExpr, resolvedScope) ->
                   let resolveRetTypeAlias =
                         case ret of
                           TName typAliasArg ->
@@ -71,50 +76,57 @@ calcDefTyp defEnv typAlias (DFun _ args ret body) =
                             Data.Maybe.fromMaybe ret (lookup typAliasArg typAlias)
                           _ -> lastExpr
                    in if resolveLastTypeAlias == resolveRetTypeAlias
-                        then pure $ TypValidated ret
+                        then pure $ (TypValidated ret, resolvedScope)
                         else throw $ AnaCompilerException ["Type mismatch: body end is not the same as return typ " ++ show resolveLastTypeAlias ++ " " ++ show resolveRetTypeAlias]
               )
    in lastBodyExprTyp
 
-calcProgTyp :: Prog -> TypEnv -> DefTypEnv -> TypAliasEnv -> IO TypValidated
-calcProgTyp (defs, typs, main) typEnv defEnv typAliasEnv =
-  mapM_ (calcDefTyp defEnv typAliasEnv) defs
-    *> calcTyp main typEnv defEnv typAliasEnv
+calcProgTyp :: Prog -> TypEnv -> DefTypEnv -> TypAliasEnv -> IO (TypValidated, [(String, TypEnv)])
+calcProgTyp (defs, _, main) typEnv defEnv typAliasEnv = do
+  sTypEnvDefs <- mapM (calcDefTyp defEnv typAliasEnv) defs
+  let scopeDefs = fmap snd sTypEnvDefs
+  (returnTypBody, scopeBody) <- runStateT (calcTyp main defEnv typAliasEnv) ("main", typEnv)
+  return (returnTypBody, scopeBody : scopeDefs)
 
-checkTNumType :: Expr -> TypEnv -> DefTypEnv -> TypAliasEnv -> IO TypValidated
+checkTNumType :: Expr -> (String, TypEnv) -> DefTypEnv -> TypAliasEnv -> IO TypValidated
 checkTNumType expr typEnv defTypEnv typAlias = do
-  TypValidated tpy <- calcTyp expr typEnv defTypEnv typAlias
+  TypValidated tpy <- evalStateT (calcTyp expr defTypEnv typAlias) typEnv
   case tpy of
     TNum -> pure $ TypValidated TNum
-    invalidType -> throw $ AnaCompilerException ["Type mismatch: op must take a number as an argument: " ++ show invalidType]
+    _ -> throw $ AnaCompilerException ["Type mismatch: op must take a number as an argument"]
 
-calcTyp :: Expr -> TypEnv -> DefTypEnv -> TypAliasEnv -> IO TypValidated
-calcTyp expr typEnv defTypEnv typAlias =
+calcTyp :: Expr -> DefTypEnv -> TypAliasEnv -> TypState TypValidated
+calcTyp expr defTypEnv typAlias =
   case expr of
     ENum _ -> pure $ TypValidated TNum
     EBool _ -> pure $ TypValidated TBool
-    EId x ->
+    EId x -> do
+      (_, typEnv) <- get
       case lookup x typEnv of
         Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" x]
         Just typ -> pure $ TypValidated typ
-    EPrim1 op e ->
+    EPrim1 op e -> do
+      typEnv <- get
       case op of
-        Add1 -> checkTNumType e typEnv defTypEnv typAlias
-        Sub1 -> checkTNumType e typEnv defTypEnv typAlias
+        Add1 -> liftIO $ checkTNumType e typEnv defTypEnv typAlias
+        Sub1 -> liftIO $ checkTNumType e typEnv defTypEnv typAlias
         IsNum -> pure $ TypValidated TBool
         IsBool -> pure $ TypValidated TBool
-        Print -> calcTyp e typEnv defTypEnv typAlias
+        Print -> calcTyp e defTypEnv typAlias
     EWhile cond _ -> do
-      TypValidated tpy <- calcTyp cond typEnv defTypEnv typAlias
+      typEnv <- get
+      TypValidated tpy <- liftIO $ evalStateT (calcTyp cond defTypEnv typAlias) typEnv
       case tpy of
         TBool -> pure $ TypValidated TBool --head $ foldl (\acc e -> calcTyp e typEnv : acc) [] body
         _ -> throw $ AnaCompilerException ["Type mismatch: while condition must take a bool as an argument"]
-    ESet _ e -> calcTyp e typEnv defTypEnv typAlias
-    ELet bindList bodyList ->
+    ESet _ e -> calcTyp e defTypEnv typAlias
+    ELet bindList bodyList -> do
+      (scope, typEnv) <- get
       let localTypEnvIO =
             foldM
               ( \acc (valName, e) -> do
-                  TypValidated typ <- calcTyp e acc defTypEnv typAlias
+                  -- it is necessary to use the acc becuase bindings may use previous references
+                  (TypValidated typ) <- evalStateT (calcTyp e defTypEnv typAlias) (scope, acc)
                   return $ (valName, typ) : acc
               )
               typEnv
@@ -123,58 +135,54 @@ calcTyp expr typEnv defTypEnv typAlias =
             localTypEnv <- localTypEnvIO
             foldM
               ( \acc e -> do
-                  res <- calcTyp e localTypEnv defTypEnv typAlias
+                  res <- evalStateT (calcTyp e defTypEnv typAlias) (scope, localTypEnv)
                   return (res : acc)
               )
               []
               bodyList
-       in -- the last element of the exprs on the body
-          -- for inner functions it would necessary to generate another def typ env???
-          fmap last bodyTypList
+       in do
+            a <- liftIO bodyTypList
+            localTypEnv <- liftIO localTypEnvIO
+            _ <- state (\(innerScope, _) -> (scope, (innerScope, localTypEnv {- ++ t -}))) -- TODO why t is not necessary anymore
+            -- b <- localTypEnvIO
+            return (last $ reverse a)
     EIf condExpr thnExpr elsExpr -> do
-      TypValidated tpy <- calcTyp condExpr typEnv defTypEnv typAlias
+      typEnv <- get
+      (TypValidated tpy) <- liftIO $ evalStateT (calcTyp condExpr defTypEnv typAlias) typEnv
       case tpy of
         TBool -> do
-          TypValidated thnExprType <- calcTyp thnExpr typEnv defTypEnv typAlias
-          TypValidated elsExprType <- calcTyp elsExpr typEnv defTypEnv typAlias
+          (TypValidated thnExprType) <- liftIO $ evalStateT (calcTyp thnExpr defTypEnv typAlias) typEnv
+          (TypValidated elsExprType) <- liftIO $ evalStateT (calcTyp elsExpr defTypEnv typAlias) typEnv
           if thnExprType == elsExprType
             then pure $ TypValidated thnExprType
             else throw $ AnaCompilerException ["Type mismatch: if branches must agree on type"]
         _ -> throw $ AnaCompilerException ["Type mismatch: if expects a boolean in conditional position"]
-    EPrim2 op e1 e2 ->
+    EPrim2 op e1 e2 -> do
+      typEnv <- get
       case op of
-        Plus -> checkTNumType e1 typEnv defTypEnv typAlias *> checkTNumType e2 typEnv defTypEnv typAlias
-        Minus -> checkTNumType e1 typEnv defTypEnv typAlias *> checkTNumType e2 typEnv defTypEnv typAlias
-        Times -> checkTNumType e1 typEnv defTypEnv typAlias *> checkTNumType e2 typEnv defTypEnv typAlias
-        Less -> (checkTNumType e1 typEnv defTypEnv typAlias *> checkTNumType e2 typEnv defTypEnv typAlias) $> TypValidated TBool
-        Greater -> (checkTNumType e1 typEnv defTypEnv typAlias *> checkTNumType e2 typEnv defTypEnv typAlias) $> TypValidated TBool
+        Plus -> liftIO $ checkTNumType e1 typEnv defTypEnv typAlias *> checkTNumType e2 typEnv defTypEnv typAlias
+        Minus -> liftIO $ checkTNumType e1 typEnv defTypEnv typAlias *> checkTNumType e2 typEnv defTypEnv typAlias
+        Times -> liftIO $ checkTNumType e1 typEnv defTypEnv typAlias *> checkTNumType e2 typEnv defTypEnv typAlias
+        Less ->
+          liftIO $
+            (checkTNumType e1 typEnv defTypEnv typAlias *> checkTNumType e2 typEnv defTypEnv typAlias)
+              $> TypValidated TBool
+        Greater ->
+          liftIO $
+            (checkTNumType e1 typEnv defTypEnv typAlias *> checkTNumType e2 typEnv defTypEnv typAlias)
+              $> TypValidated TBool
         Equal -> do
-          TypValidated e1Type <- calcTyp e1 typEnv defTypEnv typAlias
-          TypValidated e2Type <- calcTyp e2 typEnv defTypEnv typAlias
+          typEnvLocal <- get
+          (TypValidated e1Type) <- liftIO $ evalStateT (calcTyp e1 defTypEnv typAlias) typEnvLocal
+          (TypValidated e2Type) <- liftIO $ evalStateT (calcTyp e2 defTypEnv typAlias) typEnvLocal
           if e1Type == e2Type
             then pure $ TypValidated TBool
             else throw $ AnaCompilerException ["Type mismatch: equal sides must agree on type"]
     ENil typ -> pure $ TypValidated typ
     ETuple _ _ finalType -> do
-      -- print $ show exp2
-      -- TypValidated tailPair <- calcTyp exp2 typEnv defTypEnv typAlias
-      -- let typResoluction = case finalType of
-      --       (TName customType) ->
-      --         case lookup customType typAlias of
-      --           Just typ -> typ
-      --           Nothing ->
-      --             throw $ AnaCompilerException [printf "Type mismatch: unknown pair %s type" (show customType)]
-      --       typ -> typ
       pure $ TypValidated finalType
-    -- TypValidated headPair <- calcTyp exp1 typEnv defTypEnv typAlias
-    -- TypValidated tailPair <- calcTyp exp2 typEnv defTypEnv typAlias
-    -- let a = case tailPair of
-    --       (TPair tailTyp) -> tailTyp
-    --       _ -> tailPair
-    -- if headPair == a
-    --   then pure $ TypValidated (TPair a)
-    --   else throw $ AnaCompilerException ["Type mismatch: pair elements must agree on type"]
-    EHead name ->
+    EHead name -> do
+      (_, typEnv) <- get
       case lookup name typEnv of
         Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" name]
         Just (TTuple typ) -> pure $ TypValidated typ
@@ -183,17 +191,24 @@ calcTyp expr typEnv defTypEnv typAlias =
             Just (TTuple finalType) -> pure $ TypValidated finalType
             Just finalType -> pure $ TypValidated finalType
             Nothing -> pure $ throw $ AnaCompilerException [printf "Type mismatch: unknown pair %s type" (show customType)]
-        -- Just unkownType -> pure $ throw $ AnaCompilerException [printf "Type mismatch: unknown pair %s type" (show unkownType)]
         Just typ -> pure $ TypValidated typ
-    ETail name ->
+    ETail name -> do
+      (_, typEnv) <- get
       case lookup name typEnv of
         Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" name]
         Just tupleTail@(TTuple _) -> pure $ TypValidated tupleTail
         Just finalTyp@(TName _) -> pure $ TypValidated finalTyp
-        -- Just unkownType -> pure $ throw $ AnaCompilerException [printf "Type mismatch: unknown pair %s type" (show unkownType)]
         Just typ -> pure $ TypValidated typ
-    EVector exprs ->
-      let exprsTypList = foldl (\acc e -> calcTyp e typEnv defTypEnv typAlias : acc) [] exprs
+    EVector exprs -> do
+      typEnv <- get
+      let exprsTypList =
+            foldl
+              ( \acc e ->
+                  let t = evalStateT (calcTyp e defTypEnv typAlias) typEnv
+                   in t : acc
+              )
+              []
+              exprs
           headTyp = head exprsTypList
           vecType = do
             res <-
@@ -208,8 +223,18 @@ calcTyp expr typEnv defTypEnv typAlias =
             if res
               then fmap (\(TypValidated typ) -> TypValidated (TVec typ)) headTyp
               else pure $ throw $ AnaCompilerException [printf "Type mismatch: all elements of vector have to be the same"]
-       in vecType
-    EGet vec _ ->
+       in liftIO vecType
+    EDictGet dict value -> do
+      (_, typEnv) <- get
+      case lookup dict typEnv of
+        Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" dict]
+        Just (TDict typs) ->
+          case lookup value typs of
+            Just typ -> pure $ TypValidated typ
+            Nothing -> throw $ AnaCompilerException [printf "dict %s unbound key %s" dict value]
+        Just typ -> pure $ TypValidated typ
+    EGet vec _ -> do
+      (_, typEnv) <- get
       case lookup vec typEnv of
         Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" vec]
         Just (TVec typ) -> pure $ TypValidated typ
@@ -220,30 +245,32 @@ calcTyp expr typEnv defTypEnv typAlias =
               throw $ AnaCompilerException [printf "Type mismatch: invalid vec type variable identifier %s unbound" (show invalidTyp)]
             Nothing -> pure $ throw $ AnaCompilerException [printf "Type mismatch: unknown pair %s type" (show customType)]
         Just typ -> pure $ TypValidated typ
-    EVecSet vec _ exprVecSet ->
+    EVecSet vec _ exprVecSet -> do
+      sTypEnv@(_, typEnv) <- get
       case lookup vec typEnv of
         Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" vec]
         Just vecTyp -> do
-          TypValidated newTyp <- calcTyp exprVecSet typEnv defTypEnv typAlias
+          TypValidated newTyp <- liftIO $ evalStateT (calcTyp exprVecSet defTypEnv typAlias) sTypEnv
           if vecTyp == newTyp
             then pure $ TypValidated vecTyp
             else throw $ AnaCompilerException ["Type mismatch: new vec element has to be the same as vec typ"]
-    EApp name listParams ->
+    EDict listExprs ->
+      let startLocalEnv = []
+          binds =
+            foldM
+              ( \acc (valName, e) -> do
+                  (TypValidated typ) <- evalStateT (calcTyp e defTypEnv typAlias) ("", acc)
+                  return $ (valName, typ) : acc
+              )
+              startLocalEnv
+              listExprs
+       in liftIO $ fmap (TypValidated . TDict) binds
+    EApp name listParams -> do
+      sTypEnv <- get
       case lookup name defTypEnv of
         Just (typ, args) ->
-          let resolveTypeAlias =
-                map
-                  ( \arg@(name, typ) ->
-                      case typ of
-                        TName typAliasArg ->
-                          case lookup typAliasArg typAlias of
-                            Just t -> (name, t)
-                            Nothing -> arg
-                        _ -> arg
-                  )
-                  args
-              paramsCheck =
-                sequence (reverse (foldl (\acc e -> calcTyp e typEnv defTypEnv typAlias : acc) [] listParams))
+          let paramsCheck =
+                sequence (reverse (foldl (\acc e -> evalStateT (calcTyp e defTypEnv typAlias) sTypEnv : acc) [] listParams))
                   >>= ( \paramsTyps ->
                           -- error $ show $ null (paramsTyps \\ map (TypValidated . snd) resolveTypeAlias)
                           if null (paramsTyps \\ map (TypValidated . snd) args)
@@ -253,8 +280,8 @@ calcTyp expr typEnv defTypEnv typAlias =
                                 AnaCompilerException
                                   ["Type mismatch:: params type is not the same as argument type " ++ show paramsTyps ++ " " ++ show args]
                       )
-           in paramsCheck $> TypValidated typ
-        Nothing -> throw $ AnaCompilerException ["Type mismatch: def is not defined"]
+           in liftIO $ paramsCheck $> TypValidated typ
+        Nothing -> throw $ AnaCompilerException ["Type mismatch: def is not defined: " ++ name]
 
 wellFormedExprListBody :: [Def] -> [Expr] -> TEnv -> Validation Error ()
 wellFormedExprListBody defs exprs localEnv =
@@ -334,7 +361,7 @@ wellFormedE defs expr env =
        in c2 --error ("env: " ++ show env ++ "\n list: " ++ show list ++ "\n shadowEnv: " ++ show shadowEnv)
     EIf exp1 exp2 exp3 ->
       wellFormedE defs exp1 env *> wellFormedE defs exp2 env *> wellFormedE defs exp3 env
-    ENil typ -> Success ()
+    ENil _ -> Success ()
     ETuple exp1 exp2 _ ->
       wellFormedE defs exp1 env
         *> case exp2 of
@@ -358,10 +385,15 @@ wellFormedE defs expr env =
       case lookup vec env of
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" vec]
         Just _ -> Success ()
+    EDictGet dict _ ->
+      case lookup dict env of
+        Nothing -> Failure $ Error [printf "variable identifier %s unbound" dict]
+        Just _ -> Success ()
     EVecSet vec _ exprSet ->
       case lookup vec env of
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" vec]
         Just _ -> wellFormedE defs exprSet env
+    EDict listExprs -> wellFormedExprListBody defs (fmap snd listExprs) env
     EApp nameDef listParams ->
       case findDef defs nameDef of
         Just (DFun _ args _ _) ->
@@ -387,7 +419,7 @@ wellFormedDef :: [Def] -> Def -> Validation Error ()
 wellFormedDef defs (DFun _ args _ body) = wellFormedExprListBody defs body (map (\(name, _) -> (name, 1)) args)
 
 wellFormedProg :: Prog -> Validation Error ()
-wellFormedProg (defs, typs, main) =
+wellFormedProg (defs, _, main) =
   let defsValidations =
         foldl
           ( \acc def ->
@@ -435,7 +467,7 @@ exprToInstrs :: Expr -> StackIndex -> Counter -> Bool -> [Def] -> Eval [Instruct
 exprToInstrs expr si counter isTailPosition defs =
   case expr of
     EId x -> do
-      s <- get
+      (s, _, _) <- get
       let a = case lookup x s of
             Nothing -> []
             Just i -> [IMov (Reg RAX) (stackloc i)]
@@ -589,16 +621,19 @@ exprToInstrs expr si counter isTailPosition defs =
               pure $
                 opForNum
                   ++ [IMov (Reg RDI) (Reg RAX)]
+                  ++ [IMov (Reg RAX) (Const 1)]
+                  ++ [IMov (Reg RSI) (Reg RAX)]
                   ++ [ISub (Reg RSP) (Const (stackAlignment * 8))]
                   ++ [ICall "print"]
                   ++ [IAdd (Reg RSP) (Const (stackAlignment * 8))]
+                  ++ [IMov (Reg RAX) (Const (-1))]
        in finalOp
     EWhile cond bodyExprs ->
       let condInsIO = exprToInstrs cond si counter False defs
           opForNumIO = do
             condIns <- condInsIO
-            env <- get
-            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env False defs
+            (env, scope, scopeName) <- get
+            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env scope scopeName False defs
             startBranchLabel <- liftIO $ makeLabel "start" counter
             endBranchLabel <- liftIO $ makeLabel "end" counter
             return $
@@ -611,7 +646,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [ILabel endBranchLabel]
        in opForNumIO
     ESet name e -> do
-      s <- get
+      (s, _, _) <- get
       exprIO <- exprToInstrs e si counter False defs
       let updateVariable = case lookup name s of
             Nothing -> []
@@ -621,7 +656,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [IMov (stackloc i) (Reg RAX)]
        in pure updateVariable
     ELet listBindings listExpr -> do
-      ev <- get
+      (ev, typScope, scopeName) <- get
       let shadowEnv =
             filter
               ( \(name, _) ->
@@ -633,16 +668,16 @@ exprToInstrs expr si counter isTailPosition defs =
       -- _ <- liftIO $ putStrLn $ show ev
       -- _ <- liftIO $ putStrLn $ show shadowEnv
       -- _ <- liftIO $ putStrLn $ show listBindings
-      ((ins, si'), localEnv) <- liftIO $ runStateT (compileLetExpr listBindings si counter defs) shadowEnv
+      ((ins, si'), (localEnv, localScope, _)) <- liftIO $ runStateT (compileLetExpr listBindings si counter defs) (shadowEnv, typScope, scopeName)
       -- _ <- liftIO $ putStrLn $ show ins
       -- _ <- liftIO $ putStrLn $ show localEnv
       -- _ <- liftIO $ putStrLn $ show listExpr
-      b_is <- liftIO $ compileLetBody listExpr si' counter localEnv isTailPosition defs
+      b_is <- liftIO $ compileLetBody listExpr si' counter localEnv localScope scopeName isTailPosition defs
       -- _ <- liftIO $ putStrLn $ show (reverse b_is)
       return $ ins ++ concat (reverse b_is)
-    ENil typ -> pure [IMov (Reg RAX) (Const constNull)]
+    ENil _ -> pure [IMov (Reg RAX) (Const constNull)]
     ETuple exp1 (EId x) _ -> do
-      s <- get
+      (s, _, _) <- get
       e1is <- exprToInstrs exp1 si counter False defs
       let a = case lookup x s of
             Nothing -> []
@@ -682,7 +717,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING and returning pointer
        in op
     EHead name -> do
-      s <- get
+      (s, _, _) <- get
       let a = case lookup name s of
             Nothing -> []
             Just e ->
@@ -692,7 +727,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [IMov (Reg RAX) (RegOffset 8 RAX)]
        in pure a
     ETail name -> do
-      s <- get
+      (s, _, _) <- get
       let a = case lookup name s of
             Nothing -> []
             Just e ->
@@ -703,32 +738,53 @@ exprToInstrs expr si counter isTailPosition defs =
        in pure a
     EVector exprs ->
       let numElement = length exprs
-          -- eNum = ENum numElement
-          -- eNumInsIO = exprToInstrs eNum si counter False defs
           res = do
-            -- e1is <- eNumInsIO
-            env <- get
-            bodyIns <- liftIO $ compileLetBody exprs si counter env False defs
+            (env, scope, scopeName) <- get
+            bodyIns <- liftIO $ compileLetBody exprs si counter env scope scopeName False defs
             labelVecMake <- liftIO $ makeLabel ";make_vec" counter
+            labelVecMakeEnd <- liftIO $ makeLabel ";end_make_vec" counter
             let vecElements = bodyIns
             return $
               [ ILabel labelVecMake,
                 IAdd (Reg RCX) (Const 8),
-                IMov (Reg RAX) (Reg RCX),
-                IMov (Reg R10) (Reg RAX)
+                IMov (Reg R10) (Reg RCX),
+                IAdd (Reg RCX) (Const (8 * (numElement + 1))) -- save space for the next items
               ]
                 ++ [IMov (Reg RAX) (Const 2)]
-                ++ [IMov (RegOffset 0 RCX) (Reg RAX)]
+                ++ [IMov (RegOffset 0 R10) (Reg RAX)]
                 ++ [IMov (Reg RAX) (Const numElement)]
-                ++ [IAdd (Reg RCX) (Const 8)]
-                ++ [IMov (RegOffset 0 RCX) (Reg RAX)]
-                ++ [IAdd (Reg RCX) (Const 8)]
-                ++ concatMap (\ins -> ins ++ [IMov (RegOffset 0 RCX) (Reg RAX), IAdd (Reg RCX) (Const 8)]) vecElements
+                ++ [IMov (RegOffset 8 R10) (Reg RAX)]
+                ++ concatMap
+                  ( \(index, ins) ->
+                      ins ++ [IMov (RegOffset (8 * index) R10) (Reg RAX)]
+                  )
+                  (zip [2 ..] vecElements)
                 ++ [IMov (Reg RAX) (Reg R10)]
                 ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
+                ++ [ILabel labelVecMakeEnd]
        in res
+    EDictGet dictRef key -> do
+      (s, typScope, scopeName) <- get
+      case lookup scopeName typScope of
+        Just mainScope ->
+          case lookup dictRef mainScope of
+            Just (TDict elms) ->
+              case lookUp (fmap fst elms) key of
+                Just heapPos ->
+                  return $ case lookup dictRef s of
+                    Nothing -> []
+                    Just i ->
+                      [ ILabel ";get dict element",
+                        IMov (Reg RAX) (stackloc i),
+                        ISub (Reg RAX) (Const 1), --UNTAGGING
+                        IMov (Reg RAX) (RegOffset (8 * (heapPos + 2)) RAX)
+                      ]
+                Nothing -> return []
+            Just _ -> return []
+            Nothing -> return []
+        Nothing -> return []
     EGet vec item -> do
-      s <- get
+      (s, _, _) <- get
       overflowIndex <- liftIO $ makeLabel "overflow_index" counter
       endLabel <- liftIO $ makeLabel "end_get_vec" counter
       let a = case lookup vec s of
@@ -750,7 +806,7 @@ exprToInstrs expr si counter isTailPosition defs =
               ]
        in pure a
     EVecSet vec item exprSet -> do
-      s <- get
+      (s, _, _) <- get
       exprIO <- exprToInstrs exprSet si counter False defs
       overflowIndex <- liftIO $ makeLabel "overflow_index" counter
       endLabel <- liftIO $ makeLabel "end_get_vec" counter
@@ -776,10 +832,34 @@ exprToInstrs expr si counter isTailPosition defs =
                      ILabel endLabel
                    ]
        in pure a
+    EDict listExprs -> do
+      (env, scope, scopeName) <- get
+      let numElements = length listExprs
+      dictElements <- liftIO $ compileLetBody (fmap snd listExprs) si counter env scope scopeName False defs
+      -- typsExps <- liftIO $ mapM (\e -> fmap fst (runStateT (calcTyp e [] []) ("main", []))) (fmap snd listExprs)
+      labelDictMake <- liftIO $ makeLabel ";make_dict" counter
+      return $
+        [ ILabel labelDictMake,
+          IAdd (Reg RCX) (Const 8), -- bumping for using an empty space
+          IMov (Reg R15) (Reg RCX), -- save the starting place
+          IAdd (Reg RCX) (Const (8 * (numElements + 1))) -- save space for the next items
+        ]
+          ++ [IMov (Reg RAX) (Const 3)]
+          ++ [IMov (RegOffset 0 R15) (Reg RAX)]
+          ++ [IMov (Reg RAX) (Const numElements)]
+          ++ [IMov (RegOffset 8 R15) (Reg RAX)]
+          ++ concatMap
+            ( \(index, ins) ->
+                ins
+                  ++ [IMov (RegOffset (8 * index) R15) (Reg RAX)]
+            )
+            (zip [2 ..] dictElements)
+          ++ [IMov (Reg RAX) (Reg R15)]
+          ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
     EApp nameDef listParams -> do
-      currentVarEnv <- get
+      (currentVarEnv, scope, scopeName) <- get
       afterCallLabel <- liftIO $ makeLabel "after_call" counter
-      (paramsIns, _) <- liftIO $ compileEAppParams listParams (si + 2) counter defs currentVarEnv
+      (paramsIns, _) <- liftIO $ compileEAppParams listParams (si + 2) counter defs currentVarEnv scope scopeName
       let headerIns =
             if isTailPosition
               then
@@ -809,13 +889,13 @@ checkStackAligment :: Int -> Int
 checkStackAligment si =
   if si * 8 `mod` 16 == 0 then si else checkStackAligment (si + 1)
 
-compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv -> Bool -> [Def] -> IO [[Instruction]]
-compileLetBody exprs si counter localEnv isTailPosition defs =
+compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv -> Scope -> String -> Bool -> [Def] -> IO [[Instruction]]
+compileLetBody exprs si counter localEnv scope scopeName isTailPosition defs =
   foldl
     ( \a b -> do
         -- _ <- putStrLn (show localEnv)
         c <- a
-        d <- evalStateT (exprToInstrs b si counter isTailPosition defs) localEnv
+        d <- evalStateT (exprToInstrs b si counter isTailPosition defs) (localEnv, scope, scopeName)
         -- print b
         -- _ <- putStrLn " into "
         -- print d
@@ -824,11 +904,11 @@ compileLetBody exprs si counter localEnv isTailPosition defs =
     (pure [])
     exprs
 
-compileEAppParams :: [Expr] -> StackIndex -> Counter -> [Def] -> TEnv -> IO ([Instruction], StackIndex)
-compileEAppParams list si counter defs currentVarEnv =
+compileEAppParams :: [Expr] -> StackIndex -> Counter -> [Def] -> TEnv -> Scope -> String -> IO ([Instruction], StackIndex)
+compileEAppParams list si counter defs currentVarEnv scope scopeName =
   foldM
     ( \(acc, si') expr ->
-        let vInstIO = evalStateT (exprToInstrs expr si' counter False defs) currentVarEnv
+        let vInstIO = evalStateT (exprToInstrs expr si' counter False defs) (currentVarEnv, scope, scopeName)
             store = IMov (stackloc si') (Reg RAX)
          in do
               vIns <- vInstIO
@@ -845,8 +925,8 @@ compileLetExpr list si counter defs =
         let vInstIO = runStateT (exprToInstrs value si' counter False defs) lEv
             store = IMov (stackloc si') (Reg RAX)
          in do
-              (vIns, ev) <- liftIO vInstIO
-              state (\s -> ((acc ++ vIns ++ [store], si' + 1), ev ++ insertVal (x, si') s))
+              (vIns, (ev, scope1, _)) <- liftIO vInstIO
+              state (\(s, scope2, name) -> ((acc ++ vIns ++ [store], si' + 1), (ev ++ insertVal (x, si') s, scope1 ++ scope2, name)))
     )
     ([], si)
     list
@@ -856,7 +936,7 @@ compileDef :: Counter -> [Def] -> Def -> IO [Instruction]
 compileDef counter defs (DFun name args _ body) =
   let (localSi, localVarEnv) =
         mapAccumL (\acc (argName, _) -> (acc + 1, (argName, acc))) 2 args -- (zip ([0..1]::[Int]) args)
-      compiledBody = compileLetBody body localSi counter localVarEnv True defs
+      compiledBody = compileLetBody body localSi counter localVarEnv [] name True defs
       compiledFunction = (\b -> [ILabel name] ++ concat (reverse b) ++ [IRet]) <$> compiledBody
    in compiledFunction
 
@@ -882,9 +962,9 @@ compile prog = do
         (ExprValidated validProg@(validDefs, validTyps, validMain)) <- check prog
         let defEnv = buildDefEnv validDefs
         let typAliasEnv = buildTypAliasEnv validTyps
-        _ <- calcProgTyp validProg [("input", TNum)] defEnv typAliasEnv
+        (_, scopeProg) <- calcProgTyp validProg [("input", TNum)] defEnv typAliasEnv
         compiledDefs <- concat <$> mapM (compileDef counter validDefs) validDefs
-        compiledMain <- evalStateT (exprToInstrs validMain 2 counter False validDefs) [("input", 1)]
+        compiledMain <- evalStateT (exprToInstrs validMain 2 counter False validDefs) ([("input", 1)], scopeProg, "main")
         let kickoff =
               "our_code_starts_here:\n\
               \push rbx\n\

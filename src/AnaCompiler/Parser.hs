@@ -12,6 +12,7 @@ import AnaCompiler.Expr
 import Data.Char (isDigit, isSymbol)
 import Text.Parsec
 import Text.ParserCombinators.Parsec
+import Text.Read (readMaybe)
 
 data Sexp
   = Atom String
@@ -186,7 +187,21 @@ listSexpToExpr sexps =
               []
               listExpr
        in EVector body
-    [Atom "get", Atom nameVec, Atom item] -> EGet nameVec (read item)
+    Atom "Dict" : listExpr ->
+      let body =
+            foldl
+              ( \a b ->
+                  case b of
+                    List [Atom n, ie] -> (n, sexpToExpr ie) : a
+                    _ -> error $ "invalid let rec expression " ++ show b
+              )
+              []
+              listExpr
+       in EDict body
+    [Atom "get", Atom name, Atom item] ->
+      case readMaybe item of
+        Just position -> EGet name position
+        Nothing -> EDictGet name item
     [Atom nameFun, listParams] -> EApp nameFun [sexpToExpr listParams]
     Atom nameFun : rest -> EApp nameFun (reverse $ foldl (\acc ex -> sexpToExpr ex : acc) [] rest)
     -- [Atom s] -> stringToExpr s
@@ -253,6 +268,7 @@ parseTyp sexp =
             "Num" -> Right (TypAlias name TNum)
             "Bool" -> Right (TypAlias name TBool)
             customType -> Right (TypAlias name (TName customType))
+        -- [Atom "type", Atom name, List typs] -> undefined
         a -> Left $ "Parser error: unvalid custom type alias " ++ show a
 
 parseProgram :: [Sexp] -> Prog
