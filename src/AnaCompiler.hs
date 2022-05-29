@@ -4,6 +4,7 @@ import System.Environment (getArgs)
 import AnaCompiler.Parser
 import AnaCompiler.Compile (compile, calcProgTyp, buildDefEnv, buildTypAliasEnv)
 import qualified Data.Text as T
+import AnaCompiler.Expr (Typ(TNum))
 
 main :: IO ()
 main =
@@ -25,7 +26,7 @@ main =
            prog@(defs, typs, main) = parseProgram sexEps 
            defEnv = buildDefEnv defs
            typAliasEnv = buildTypAliasEnv typs
-           typ = calcProgTyp prog [] defEnv typAliasEnv
+           typ = calcProgTyp prog [("input", TNum)] defEnv typAliasEnv
            result = compile prog
            in
             result >>= putStrLn

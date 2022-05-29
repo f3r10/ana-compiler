@@ -196,7 +196,7 @@ spec = do
        in result `shouldThrow` (== AnaCompilerException ["Type mismatch: if branches must agree on type"])
     it "print input" $ do
       a <- test_file "print_input_test" "print.ana" ["5"]
-      shouldBe a "5\n5"
+      shouldBe a "5"
     it "fibbonaci function" $ do
       a <- test_file "fibbonaci_function_test" "fib.ana" ["15"]
       shouldBe a "610"
