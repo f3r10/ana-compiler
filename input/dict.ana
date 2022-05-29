@@ -1,0 +1,4 @@
+(def makeNode(n: Num z: Num): Num
+  (let ((b (+ n z))) b))
+
+(let ((a (Dict (x true) (z (vec 100 2 3)) (y 20)))) (print (get a z)) (print (get a x)) (nil Num) a)
