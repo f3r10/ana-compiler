@@ -111,12 +111,16 @@ listSexpToExpr sexps =
     [Atom "sub1", e1] -> EPrim1 Sub1 (sexpToExpr e1)
     [Atom "isNum", e1] -> EPrim1 IsNum (sexpToExpr e1)
     [Atom "isBool", e1] -> EPrim1 IsBool (sexpToExpr e1)
+    -- [Atom "isNull", Atom ref] -> IsNull ref
     [Atom "print", e1] -> EPrim1 Print (sexpToExpr e1)
     [Atom "true"] -> EBool True
     [Atom "false"] -> EBool False
     [Atom "if", e1, e2, e3] -> EIf (sexpToExpr e1) (sexpToExpr e2) (sexpToExpr e3)
     [Atom "set", Atom val, e1] -> ESet val (sexpToExpr e1)
-    [Atom "set", Atom val, Atom item, e1] -> EVecSet val (read item) (sexpToExpr e1)
+    [Atom "set", Atom val, Atom item, e1] -> 
+      case readMaybe item of
+        Just i -> EVecSet val i (sexpToExpr e1)
+        Nothing -> EDictSet val item (sexpToExpr e1)
     Atom "while" : condExp : listExpr ->
       let body =
             foldl
@@ -263,6 +267,23 @@ parseTyp sexp =
             "Num" -> Right (TypAlias name (TTuple TNum))
             "Bool" -> Right (TypAlias name (TTuple TBool))
             customType -> Right (TypAlias name (TTuple (TName customType)))
+        [Atom "type", Atom name, List [Atom "Dict", List dictTyps]] -> 
+          let dictTyp =
+                foldl
+                  ( \acc b ->
+                      case b of
+                        List [Atom n, Atom typStr] -> 
+                          let
+                            typ = case typStr of
+                                  "Num" -> TNum
+                                  "Bool" -> TBool
+                                  customType -> TName customType
+                            in (n, typ) : acc
+                        _ -> error $ "invalid let rec expression " ++ show b
+                  )
+                  []
+                  dictTyps
+          in Right (TypAlias name (TDict (reverse dictTyp)))
         [Atom "type", Atom name, Atom typ] ->
           case typ of
             "Num" -> Right (TypAlias name TNum)

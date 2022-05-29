@@ -36,6 +36,7 @@ data Expr
   | EVector [Expr]
   | EDict [(String, Expr)]
   | EDictGet String String
+  | EDictSet String String Expr
   | EGet String Int
   | EBool Bool
   | ETuple Expr Expr Typ

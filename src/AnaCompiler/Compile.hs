@@ -29,7 +29,9 @@ constNull = 0x00000000
 
 type Scope = [(String, TypEnv)]
 
-type Eval a = StateT (TEnv, Scope, String) IO a
+type CompilerEnv = (TEnv, Scope, String, TypAliasEnv)
+
+type Eval a = StateT CompilerEnv IO a
 
 type TypState a = StateT (String, TypEnv) IO a
 
@@ -103,7 +105,7 @@ calcTyp expr defTypEnv typAlias =
     EId x -> do
       (_, typEnv) <- get
       case lookup x typEnv of
-        Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" x]
+        Nothing -> throw $ AnaCompilerException [printf "Type checking error: variable identifier %s unbound" x]
         Just typ -> pure $ TypValidated typ
     EPrim1 op e -> do
       typEnv <- get
@@ -232,6 +234,14 @@ calcTyp expr defTypEnv typAlias =
           case lookup value typs of
             Just typ -> pure $ TypValidated typ
             Nothing -> throw $ AnaCompilerException [printf "dict %s unbound key %s" dict value]
+        Just (TName typ) ->
+          case lookup typ typAlias of
+            Just (TDict typs) ->
+              case lookup value typs of
+                Just currentType -> pure $ TypValidated currentType
+                Nothing -> throw $ AnaCompilerException [printf "dict %s unbound key %s" dict value]
+            Just invalid -> throw $ AnaCompilerException ["Type mismatch: new dict element has to be the same as current dict typ"]
+            Nothing -> undefined
         Just typ -> pure $ TypValidated typ
     EGet vec _ -> do
       (_, typEnv) <- get
@@ -254,12 +264,38 @@ calcTyp expr defTypEnv typAlias =
           if vecTyp == newTyp
             then pure $ TypValidated vecTyp
             else throw $ AnaCompilerException ["Type mismatch: new vec element has to be the same as vec typ"]
-    EDict listExprs ->
+    EDictSet dict value exprDictSet -> do
+      sTypEnv@(_, typEnv) <- get
+      case lookup dict typEnv of
+        Nothing -> throw $ AnaCompilerException [printf "variable identifier %s unbound" dict]
+        Just (TDict typs) ->
+          case lookup value typs of
+            Just currentType -> do
+              TypValidated newTyp <- liftIO $ evalStateT (calcTyp exprDictSet defTypEnv typAlias) sTypEnv
+              if currentType == newTyp
+                then pure $ TypValidated currentType
+                else throw $ AnaCompilerException ["Type mismatch: new dict element has to be the same as current dict typ"]
+            Nothing -> throw $ AnaCompilerException [printf "dict %s unbound key %s" dict value]
+        Just (TName typ) ->
+          case lookup typ typAlias of
+            Just (TDict typs) ->
+              case lookup value typs of
+                Just currentType -> do
+                  TypValidated newTyp <- liftIO $ evalStateT (calcTyp exprDictSet defTypEnv typAlias) sTypEnv
+                  if currentType == newTyp
+                    then pure $ TypValidated currentType
+                    else throw $ AnaCompilerException ["Type mismatch: new dict element has to be the same as current dict typ"]
+                Nothing -> throw $ AnaCompilerException [printf "dict %s unbound key %s" dict value]
+            Just invalid -> throw $ AnaCompilerException ["Type mismatch: new dict element has to be the same as current dict typ"]
+            Nothing -> undefined
+        Just invalidType -> throw $ AnaCompilerException ["Type mismatch: new dict element has to be the same as current dict typ"]
+    EDict listExprs -> do
+      typScope <- get
       let startLocalEnv = []
           binds =
             foldM
               ( \acc (valName, e) -> do
-                  (TypValidated typ) <- evalStateT (calcTyp e defTypEnv typAlias) ("", acc)
+                  (TypValidated typ) <- evalStateT (calcTyp e defTypEnv typAlias) typScope
                   return $ (valName, typ) : acc
               )
               startLocalEnv
@@ -393,6 +429,10 @@ wellFormedE defs expr env =
       case lookup vec env of
         Nothing -> Failure $ Error [printf "variable identifier %s unbound" vec]
         Just _ -> wellFormedE defs exprSet env
+    EDictSet dict _ exprDictSet ->
+      case lookup dict env of
+        Nothing -> Failure $ Error [printf "variable identifier %s unbound" dict]
+        Just _ -> wellFormedE defs exprDictSet env
     EDict listExprs -> wellFormedExprListBody defs (fmap snd listExprs) env
     EApp nameDef listParams ->
       case findDef defs nameDef of
@@ -467,7 +507,7 @@ exprToInstrs :: Expr -> StackIndex -> Counter -> Bool -> [Def] -> Eval [Instruct
 exprToInstrs expr si counter isTailPosition defs =
   case expr of
     EId x -> do
-      (s, _, _) <- get
+      (s, _, _, _) <- get
       let a = case lookup x s of
             Nothing -> []
             Just i -> [IMov (Reg RAX) (stackloc i)]
@@ -626,14 +666,14 @@ exprToInstrs expr si counter isTailPosition defs =
                   ++ [ISub (Reg RSP) (Const (stackAlignment * 8))]
                   ++ [ICall "print"]
                   ++ [IAdd (Reg RSP) (Const (stackAlignment * 8))]
-                  ++ [IMov (Reg RAX) (Const (-1))]
+                  ++ [IMov (Reg RAX) (Const (0))]
        in finalOp
     EWhile cond bodyExprs ->
       let condInsIO = exprToInstrs cond si counter False defs
           opForNumIO = do
             condIns <- condInsIO
-            (env, scope, scopeName) <- get
-            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env scope scopeName False defs
+            env <- get
+            bodyIns <- liftIO $ compileLetBody bodyExprs si counter env False defs
             startBranchLabel <- liftIO $ makeLabel "start" counter
             endBranchLabel <- liftIO $ makeLabel "end" counter
             return $
@@ -646,7 +686,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [ILabel endBranchLabel]
        in opForNumIO
     ESet name e -> do
-      (s, _, _) <- get
+      (s, _, _, _) <- get
       exprIO <- exprToInstrs e si counter False defs
       let updateVariable = case lookup name s of
             Nothing -> []
@@ -656,7 +696,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [IMov (stackloc i) (Reg RAX)]
        in pure updateVariable
     ELet listBindings listExpr -> do
-      (ev, typScope, scopeName) <- get
+      (ev, typScope, scopeName, typAliasEnv) <- get
       let shadowEnv =
             filter
               ( \(name, _) ->
@@ -668,16 +708,16 @@ exprToInstrs expr si counter isTailPosition defs =
       -- _ <- liftIO $ putStrLn $ show ev
       -- _ <- liftIO $ putStrLn $ show shadowEnv
       -- _ <- liftIO $ putStrLn $ show listBindings
-      ((ins, si'), (localEnv, localScope, _)) <- liftIO $ runStateT (compileLetExpr listBindings si counter defs) (shadowEnv, typScope, scopeName)
+      ((ins, si'), (localEnv, localScope, _, _)) <- liftIO $ runStateT (compileLetExpr listBindings si counter defs) (shadowEnv, typScope, scopeName, typAliasEnv)
       -- _ <- liftIO $ putStrLn $ show ins
       -- _ <- liftIO $ putStrLn $ show localEnv
       -- _ <- liftIO $ putStrLn $ show listExpr
-      b_is <- liftIO $ compileLetBody listExpr si' counter localEnv localScope scopeName isTailPosition defs
+      b_is <- liftIO $ compileLetBody listExpr si' counter (localEnv, localScope, scopeName, typAliasEnv) isTailPosition defs
       -- _ <- liftIO $ putStrLn $ show (reverse b_is)
       return $ ins ++ concat (reverse b_is)
     ENil _ -> pure [IMov (Reg RAX) (Const constNull)]
     ETuple exp1 (EId x) _ -> do
-      (s, _, _) <- get
+      (s, _, _, _) <- get
       e1is <- exprToInstrs exp1 si counter False defs
       let a = case lookup x s of
             Nothing -> []
@@ -717,7 +757,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING and returning pointer
        in op
     EHead name -> do
-      (s, _, _) <- get
+      (s, _, _, _) <- get
       let a = case lookup name s of
             Nothing -> []
             Just e ->
@@ -727,7 +767,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [IMov (Reg RAX) (RegOffset 8 RAX)]
        in pure a
     ETail name -> do
-      (s, _, _) <- get
+      (s, _, _, _) <- get
       let a = case lookup name s of
             Nothing -> []
             Just e ->
@@ -739,8 +779,8 @@ exprToInstrs expr si counter isTailPosition defs =
     EVector exprs ->
       let numElement = length exprs
           res = do
-            (env, scope, scopeName) <- get
-            bodyIns <- liftIO $ compileLetBody exprs si counter env scope scopeName False defs
+            env <- get
+            bodyIns <- liftIO $ compileLetBody exprs si counter env False defs
             labelVecMake <- liftIO $ makeLabel ";make_vec" counter
             labelVecMakeEnd <- liftIO $ makeLabel ";end_make_vec" counter
             let vecElements = bodyIns
@@ -764,7 +804,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [ILabel labelVecMakeEnd]
        in res
     EDictGet dictRef key -> do
-      (s, typScope, scopeName) <- get
+      (s, typScope, scopeName, _) <- get
       case lookup scopeName typScope of
         Just mainScope ->
           case lookup dictRef mainScope of
@@ -784,7 +824,7 @@ exprToInstrs expr si counter isTailPosition defs =
             Nothing -> return []
         Nothing -> return []
     EGet vec item -> do
-      (s, _, _) <- get
+      (s, _, _, _) <- get
       overflowIndex <- liftIO $ makeLabel "overflow_index" counter
       endLabel <- liftIO $ makeLabel "end_get_vec" counter
       let a = case lookup vec s of
@@ -806,7 +846,7 @@ exprToInstrs expr si counter isTailPosition defs =
               ]
        in pure a
     EVecSet vec item exprSet -> do
-      (s, _, _) <- get
+      (s, _, _, _) <- get
       exprIO <- exprToInstrs exprSet si counter False defs
       overflowIndex <- liftIO $ makeLabel "overflow_index" counter
       endLabel <- liftIO $ makeLabel "end_get_vec" counter
@@ -824,7 +864,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ exprIO
                 ++ [ IMov (Reg R10) (stackloc i),
                      ISub (Reg R10) (Const 1), --UNTAGGING
-                     IMov (RegOffset (8 * (item + 1)) R10) (Reg RAX),
+                     IMov (RegOffset (8 * (item + 2)) R10) (Reg RAX),
                      IJmp endLabel,
                      ILabel overflowIndex,
                      ICall "error_index_out_of_bounds",
@@ -832,10 +872,56 @@ exprToInstrs expr si counter isTailPosition defs =
                      ILabel endLabel
                    ]
        in pure a
+    EDictSet dictRef key exprDictSet -> do
+      (s, typScope, scopeName, typAliasEnv) <- get
+      -- _ <- liftIO $ print typScope
+      -- _ <- liftIO $ print scopeName
+      -- _ <- liftIO $ print dictRef
+      -- _ <- liftIO $ print typAliasEnv
+      exprIO <- exprToInstrs exprDictSet si counter False defs
+      case lookup scopeName typScope of
+        Just mainScope ->
+          case lookup dictRef mainScope of
+            Just (TDict elms) -> do
+              case lookUp (fmap fst elms) key of
+                Just heapPos -> do
+                  -- _ <- liftIO $ print heapPos
+                  return $ case lookup dictRef s of
+                    Nothing -> []
+                    Just i ->
+                      exprIO
+                        ++ [ IMov (Reg R10) (stackloc i),
+                             ISub (Reg R10) (Const 1), --UNTAGGING
+                             IMov (RegOffset (8 * (heapPos + 2)) R10) (Reg RAX),
+                             IMov (Reg RAX) (stackloc i)
+                           ]
+                Nothing -> return []
+            Just (TName typ) -> do
+              -- _ <- liftIO $ print ("here " ++ show typ)
+              case lookup typ typAliasEnv of
+                Just (TDict elms) ->
+                  case lookUp (fmap fst elms) key of
+                    Just heapPos -> do
+                      -- _ <- liftIO $ print heapPos
+                      return $ case lookup dictRef s of
+                        Nothing -> []
+                        Just i ->
+                          exprIO
+                            ++ [ IMov (Reg R10) (stackloc i),
+                                 ISub (Reg R10) (Const 1), --UNTAGGING
+                                 IMov (RegOffset (8 * (heapPos + 2)) R10) (Reg RAX),
+                                 IMov (Reg RAX) (stackloc i)
+                               ]
+                    Nothing -> return []
+                Just _ -> return []
+                Nothing -> return []
+            Just _ -> return []
+            Nothing -> return []
+        Nothing -> return []
     EDict listExprs -> do
-      (env, scope, scopeName) <- get
+      env <- get
       let numElements = length listExprs
-      dictElements <- liftIO $ compileLetBody (fmap snd listExprs) si counter env scope scopeName False defs
+      dictElements <- liftIO $ compileLetBody (fmap snd listExprs) si counter env False defs
       -- typsExps <- liftIO $ mapM (\e -> fmap fst (runStateT (calcTyp e [] []) ("main", []))) (fmap snd listExprs)
       labelDictMake <- liftIO $ makeLabel ";make_dict" counter
       return $
@@ -857,9 +943,9 @@ exprToInstrs expr si counter isTailPosition defs =
           ++ [IMov (Reg RAX) (Reg R15)]
           ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
     EApp nameDef listParams -> do
-      (currentVarEnv, scope, scopeName) <- get
+      currentVarEnv <- get
       afterCallLabel <- liftIO $ makeLabel "after_call" counter
-      (paramsIns, _) <- liftIO $ compileEAppParams listParams (si + 2) counter defs currentVarEnv scope scopeName
+      (paramsIns, _) <- liftIO $ compileEAppParams listParams (si + 2) counter defs currentVarEnv
       let headerIns =
             if isTailPosition
               then
@@ -889,13 +975,13 @@ checkStackAligment :: Int -> Int
 checkStackAligment si =
   if si * 8 `mod` 16 == 0 then si else checkStackAligment (si + 1)
 
-compileLetBody :: [Expr] -> StackIndex -> Counter -> TEnv -> Scope -> String -> Bool -> [Def] -> IO [[Instruction]]
-compileLetBody exprs si counter localEnv scope scopeName isTailPosition defs =
+compileLetBody :: [Expr] -> StackIndex -> Counter -> CompilerEnv -> Bool -> [Def] -> IO [[Instruction]]
+compileLetBody exprs si counter env isTailPosition defs =
   foldl
     ( \a b -> do
         -- _ <- putStrLn (show localEnv)
         c <- a
-        d <- evalStateT (exprToInstrs b si counter isTailPosition defs) (localEnv, scope, scopeName)
+        d <- evalStateT (exprToInstrs b si counter isTailPosition defs) env
         -- print b
         -- _ <- putStrLn " into "
         -- print d
@@ -904,11 +990,11 @@ compileLetBody exprs si counter localEnv scope scopeName isTailPosition defs =
     (pure [])
     exprs
 
-compileEAppParams :: [Expr] -> StackIndex -> Counter -> [Def] -> TEnv -> Scope -> String -> IO ([Instruction], StackIndex)
-compileEAppParams list si counter defs currentVarEnv scope scopeName =
+compileEAppParams :: [Expr] -> StackIndex -> Counter -> [Def] -> CompilerEnv -> IO ([Instruction], StackIndex)
+compileEAppParams list si counter defs env =
   foldM
     ( \(acc, si') expr ->
-        let vInstIO = evalStateT (exprToInstrs expr si' counter False defs) (currentVarEnv, scope, scopeName)
+        let vInstIO = evalStateT (exprToInstrs expr si' counter False defs) env
             store = IMov (stackloc si') (Reg RAX)
          in do
               vIns <- vInstIO
@@ -925,8 +1011,8 @@ compileLetExpr list si counter defs =
         let vInstIO = runStateT (exprToInstrs value si' counter False defs) lEv
             store = IMov (stackloc si') (Reg RAX)
          in do
-              (vIns, (ev, scope1, _)) <- liftIO vInstIO
-              state (\(s, scope2, name) -> ((acc ++ vIns ++ [store], si' + 1), (ev ++ insertVal (x, si') s, scope1 ++ scope2, name)))
+              (vIns, (ev, scope1, _, _)) <- liftIO vInstIO
+              state (\(s, scope2, name, typAliasEnv) -> ((acc ++ vIns ++ [store], si' + 1), (ev ++ insertVal (x, si') s, scope1 ++ scope2, name, typAliasEnv)))
     )
     ([], si)
     list
@@ -936,7 +1022,7 @@ compileDef :: Counter -> [Def] -> Def -> IO [Instruction]
 compileDef counter defs (DFun name args _ body) =
   let (localSi, localVarEnv) =
         mapAccumL (\acc (argName, _) -> (acc + 1, (argName, acc))) 2 args -- (zip ([0..1]::[Int]) args)
-      compiledBody = compileLetBody body localSi counter localVarEnv [] name True defs
+      compiledBody = compileLetBody body localSi counter (localVarEnv, [], name, []) True defs
       compiledFunction = (\b -> [ILabel name] ++ concat (reverse b) ++ [IRet]) <$> compiledBody
    in compiledFunction
 
@@ -964,7 +1050,7 @@ compile prog = do
         let typAliasEnv = buildTypAliasEnv validTyps
         (_, scopeProg) <- calcProgTyp validProg [("input", TNum)] defEnv typAliasEnv
         compiledDefs <- concat <$> mapM (compileDef counter validDefs) validDefs
-        compiledMain <- evalStateT (exprToInstrs validMain 2 counter False validDefs) ([("input", 1)], scopeProg, "main")
+        compiledMain <- evalStateT (exprToInstrs validMain 2 counter False validDefs) ([("input", 1)], scopeProg, "main", typAliasEnv)
         let kickoff =
               "our_code_starts_here:\n\
               \push rbx\n\
