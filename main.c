@@ -44,8 +44,12 @@ void print(int64_t val, int printSpace) {
     } else {
       printf("true");
     }
-  } else if (val == -2) {
-    printf("null\n");
+  } else if (val == -1) {
+    if (printSpace == 1) {
+      printf("null\n");
+    } else {
+      printf("null");
+    }
   } else if (isPointer(val)) {
     /*
       Tuple -> [type:1, val, pointer] -> [type, val, pointer]
@@ -101,12 +105,8 @@ void print(int64_t val, int printSpace) {
     }
 
   } else {
-    if (val == -1) {
-      // printf("\n");
-    } else {
       fprintf(stderr, "Unknown value: %ld\n", val);
       exit(1);
-    }
   }
 }
 

@@ -25,7 +25,7 @@ constFalse :: Int
 constFalse = 0x7FFFFFFF
 
 constNull :: Int
-constNull = 0x00000000
+constNull = -1
 
 type Scope = [(String, TypEnv)]
 
@@ -114,6 +114,7 @@ calcTyp expr defTypEnv typAlias =
         Sub1 -> liftIO $ checkTNumType e typEnv defTypEnv typAlias
         IsNum -> pure $ TypValidated TBool
         IsBool -> pure $ TypValidated TBool
+        IsNull -> pure $ TypValidated TBool
         Print -> calcTyp e defTypEnv typAlias
     EWhile cond _ -> do
       typEnv <- get
@@ -655,6 +656,20 @@ exprToInstrs expr si counter isTailPosition defs =
                   ++ [ILabel noBoolBranchLabel]
                   ++ [IMov (Reg RAX) (Const constFalse)]
                   ++ [ILabel endCmpBranchLabel]
+            IsNull -> do
+              expIns <- expInsIO
+              noNullBranchLabel <- liftIO $ makeLabel "non_null" counter
+              endCmpNullBranchLabel <- liftIO $ makeLabel "end_null_cmp" counter
+              return $
+                expIns
+                  ++ [ ICmp (Reg RAX) (Const constNull),
+                       IJne noNullBranchLabel,
+                       IMov (Reg RAX) (Const constTrue),
+                       IJmp endCmpNullBranchLabel,
+                       ILabel noNullBranchLabel,
+                       IMov (Reg RAX) (Const constFalse),
+                       ILabel endCmpNullBranchLabel
+                     ]
             Print -> do
               opForNum <- opForNumIO
               let stackAlignment = checkStackAligment si

@@ -111,7 +111,7 @@ listSexpToExpr sexps =
     [Atom "sub1", e1] -> EPrim1 Sub1 (sexpToExpr e1)
     [Atom "isNum", e1] -> EPrim1 IsNum (sexpToExpr e1)
     [Atom "isBool", e1] -> EPrim1 IsBool (sexpToExpr e1)
-    -- [Atom "isNull", Atom ref] -> IsNull ref
+    [Atom "isNull", e1] -> EPrim1 IsNull (sexpToExpr e1)
     [Atom "print", e1] -> EPrim1 Print (sexpToExpr e1)
     [Atom "true"] -> EBool True
     [Atom "false"] -> EBool False
