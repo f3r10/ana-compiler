@@ -804,7 +804,7 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [ILabel labelVecMakeEnd]
        in res
     EDictGet dictRef key -> do
-      (s, typScope, scopeName, _) <- get
+      (s, typScope, scopeName, typAliasEnv) <- get
       case lookup scopeName typScope of
         Just mainScope ->
           case lookup dictRef mainScope of
@@ -819,6 +819,22 @@ exprToInstrs expr si counter isTailPosition defs =
                         ISub (Reg RAX) (Const 1), --UNTAGGING
                         IMov (Reg RAX) (RegOffset (8 * (heapPos + 2)) RAX)
                       ]
+                Nothing -> return []
+            Just (TName typ) ->
+              case lookup typ typAliasEnv of
+                Just (TDict elms) ->
+                  case lookUp (fmap fst elms) key of
+                    Just heapPos ->
+                      return $ case lookup dictRef s of
+                        Nothing -> []
+                        Just i ->
+                          [ ILabel ";get dict element",
+                            IMov (Reg RAX) (stackloc i),
+                            ISub (Reg RAX) (Const 1), --UNTAGGING
+                            IMov (Reg RAX) (RegOffset (8 * (heapPos + 2)) RAX)
+                          ]
+                    Nothing -> return []
+                Just _ -> return []
                 Nothing -> return []
             Just _ -> return []
             Nothing -> return []
@@ -1018,11 +1034,11 @@ compileLetExpr list si counter defs =
     list
 
 -- local variables enviroment depends on the number of args
-compileDef :: Counter -> [Def] -> Def -> IO [Instruction]
-compileDef counter defs (DFun name args _ body) =
+compileDef :: Counter -> Scope -> TypAliasEnv -> [Def] -> Def -> IO [Instruction]
+compileDef counter scope typAliasEnv defs (DFun name args _ body) =
   let (localSi, localVarEnv) =
         mapAccumL (\acc (argName, _) -> (acc + 1, (argName, acc))) 2 args -- (zip ([0..1]::[Int]) args)
-      compiledBody = compileLetBody body localSi counter (localVarEnv, [], name, []) True defs
+      compiledBody = compileLetBody body localSi counter (localVarEnv, scope, name, typAliasEnv) True defs
       compiledFunction = (\b -> [ILabel name] ++ concat (reverse b) ++ [IRet]) <$> compiledBody
    in compiledFunction
 
@@ -1049,7 +1065,7 @@ compile prog = do
         let defEnv = buildDefEnv validDefs
         let typAliasEnv = buildTypAliasEnv validTyps
         (_, scopeProg) <- calcProgTyp validProg [("input", TNum)] defEnv typAliasEnv
-        compiledDefs <- concat <$> mapM (compileDef counter validDefs) validDefs
+        compiledDefs <- concat <$> mapM (compileDef counter scopeProg typAliasEnv validDefs) validDefs
         compiledMain <- evalStateT (exprToInstrs validMain 2 counter False validDefs) ([("input", 1)], scopeProg, "main", typAliasEnv)
         let kickoff =
               "our_code_starts_here:\n\
