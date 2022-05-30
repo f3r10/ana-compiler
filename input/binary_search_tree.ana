@@ -1,0 +1,28 @@
+(type Node (Dict ((data Num) (leftChild Node) (rightChild Node))))
+
+(def makeNode(d : Num): Node
+  (Dict (data d) (leftChild (nil Node)) (rightChild (nil Node))))
+
+(def insert(root: Node x: Num): Node
+    (if (isNull root)
+        (makeNode x)
+        (if (> x (get root data))
+          (set root rightChild (insert (get root rightChild) x))
+          (set root leftChild (insert (get root leftChild) x)))))
+
+(def search(root: Node x: Num): Node
+  (if (isNull root)
+    root
+    (if (== x (get root data))
+      root
+      (if (> x (get root data))
+        (search (get root rightChild) x)
+        (search (get root leftChild) x)))))
+
+(let ((b 20) (a (makeNode b)) (c (makeNode 10))) 
+  (insert a 5) 
+  (insert a 1) 
+  (insert a 15) 
+  (insert a 30) 
+  (insert a 16) 
+  (search a 15))
