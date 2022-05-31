@@ -1,0 +1,40 @@
+(type LinkedList (Dict ((data Num) (next LinkedList))))
+
+(def makeNode(d : Num): LinkedList
+  (Dict (data d) (next (nil LinkedList))))
+
+(def appendNode(root: LinkedList key: Num): LinkedList
+  (if (isNull root) 
+    (makeNode key)
+    (if (isNull (get root next))
+      (set root next (makeNode key))
+      (set root next (appendNode (get root next) key)))))
+
+(def push(root: LinkedList key: Num): LinkedList
+  (let ((newNode (makeNode key))) 
+    (set newNode next root)))
+
+(def getData(root: LinkedList): Num
+  (if (isNull root)
+    (nil Num)
+    (get root data)))
+
+(def getItemPos(root: LinkedList pos: Num): Num
+  (let ((localRoot root))
+    (if (isNull root) 
+      (nil Num)
+      (if (> pos 0)
+        (getItemPos (get localRoot next) (sub1 pos))
+        (getData localRoot)))))
+
+(let ((list (makeNode 5))) 
+  (appendNode list 10) 
+  (appendNode list 1) 
+  (appendNode list 0)
+  (appendNode list 20)
+  (set list (push list 100))
+  (set list (push list 2))
+  (appendNode list 1000)
+  (print list)
+  (print (getItemPos list 7))
+  (getItemPos list 8))
