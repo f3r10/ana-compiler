@@ -1,25 +1,16 @@
-# compile: compile.ml
-# 	ocamlfind ocamlc -o compile -thread -package oUnit -package sexplib -linkpkg -g compile.ml
-#
-# %.run: %.o
-# 	clang -o $@ main.c $<
-#
-# %.o: %.s
-# 	nasm -f macho64 -o $@ $<
-#
-# %.s: %.int compile
-# 	./compile $< > $@
+main: src/*
+	./build
 
-
-compile: src/*
-	cabal v2-install --install-method=copy --installdir=. --overwrite-policy=always
-
-%.run: %.o
-	# clang -o $@ main.c $<
+output/%.run: output/%.o main.c
 	clang -o $@ -g -fsanitize=address main.c $<
 
-%.o: %.s
+output/%.o: output/%.s
 	nasm -f elf64 -o $@ $<
 
-%.s: %.ana compile
-	./compile $< > $@
+output/%.s: input/%.ana main
+	mkdir -p output
+	bin/compile $< > $@
+
+clean:
+	rm -rf output/*.o output/*.s output/*.dSYM output/*.run *.log
+
