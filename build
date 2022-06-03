@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+stack build :compile --verbosity error
+stack install :compile --local-bin-path bin/ --verbosity error
