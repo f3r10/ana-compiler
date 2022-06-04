@@ -402,7 +402,7 @@ wellFormedE defs expr env =
     ETuple exp1 exp2 _ ->
       wellFormedE defs exp1 env
         *> case exp2 of
-          ETuple {} -> wellFormedE defs exp2 env
+          ETuple{} -> wellFormedE defs exp2 env
           ENil _ -> Success ()
           EId x ->
             case lookup x env of
@@ -662,13 +662,13 @@ exprToInstrs expr si counter isTailPosition defs =
               endCmpNullBranchLabel <- liftIO $ makeLabel "end_null_cmp" counter
               return $
                 expIns
-                  ++ [ ICmp (Reg RAX) (Const constNull),
-                       IJne noNullBranchLabel,
-                       IMov (Reg RAX) (Const constTrue),
-                       IJmp endCmpNullBranchLabel,
-                       ILabel noNullBranchLabel,
-                       IMov (Reg RAX) (Const constFalse),
-                       ILabel endCmpNullBranchLabel
+                  ++ [ ICmp (Reg RAX) (Const constNull)
+                     , IJne noNullBranchLabel
+                     , IMov (Reg RAX) (Const constTrue)
+                     , IJmp endCmpNullBranchLabel
+                     , ILabel noNullBranchLabel
+                     , IMov (Reg RAX) (Const constFalse)
+                     , ILabel endCmpNullBranchLabel
                      ]
             Print -> do
               opForNum <- opForNumIO
@@ -749,27 +749,26 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
        in pure a
     ETuple exp1 exp2 _ ->
-      let e1isIO = exprToInstrs exp1 (si + 3) counter False defs
-          e2isIO = exprToInstrs exp2 (si + 4) counter False defs
+      let e1isIO = exprToInstrs exp1 si counter False defs
+          e2isIO = exprToInstrs exp2 (si + 1) counter False defs
           op = do
             e1is <- e1isIO
             e2is <- e2isIO
             return $
-              [ IMov (Reg RAX) (Reg RCX),
-                IAdd (Reg RCX) (Const 32),
-                IAdd (Reg RAX) (Const 32),
-                IMov (stackloc si) (Reg RAX),
-                IMov (Reg RAX) (Const 1),
-                IMov (RegOffset 0 RCX) (Reg RAX) -- type
-              ]
-                ++ e1is
-                ++ [IMov (RegOffset 8 RCX) (Reg RAX)] -- val
-                ++ e2is --pointer
-                ++ [IMov (Reg R10) (Reg RAX)]
+              e1is
+                ++ [IMov (stackloc si) (Reg RAX)]
+                ++ e2is -- a value or a pointer to a nested structure
+                ++ [IMov (stackloc (si + 1)) (Reg RAX)]
+                ++ [ IMov (Reg RAX) (Const 1)
+                   , IMov (RegOffset 0 RCX) (Reg RAX)
+                   ]
                 ++ [IMov (Reg RAX) (stackloc si)]
-                ++ [IMov (RegOffset 16 RAX) (Reg R10)] -- move pointer to next spot
-                ++ [IMov (Reg RAX) (stackloc si)]
-                ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING and returning pointer
+                ++ [IMov (RegOffset 8 RCX) (Reg RAX)]
+                ++ [IMov (Reg RAX) (stackloc (si + 1))]
+                ++ [IMov (RegOffset 16 RCX) (Reg RAX)]
+                ++ [IMov (Reg RAX) (Reg RCX)]
+                ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
+                ++ [IAdd (Reg RCX) (Const 24)]
        in op
     EHead name -> do
       (s, _, _, _) <- get
@@ -791,33 +790,9 @@ exprToInstrs expr si counter isTailPosition defs =
                 ++ [ISub (Reg RAX) (Const 1)] -- UNTAGGING
                 ++ [IMov (Reg RAX) (RegOffset 16 RAX)]
        in pure a
-    EVector exprs ->
-      let numElement = length exprs
-          res = do
-            env <- get
-            bodyIns <- liftIO $ compileLetBody exprs si counter env False defs
-            labelVecMake <- liftIO $ makeLabel ";make_vec" counter
-            labelVecMakeEnd <- liftIO $ makeLabel ";end_make_vec" counter
-            let vecElements = bodyIns
-            return $
-              [ ILabel labelVecMake,
-                IAdd (Reg RCX) (Const 8),
-                IMov (Reg R10) (Reg RCX),
-                IAdd (Reg RCX) (Const (8 * (numElement + 1))) -- save space for the next items
-              ]
-                ++ [IMov (Reg RAX) (Const 2)]
-                ++ [IMov (RegOffset 0 R10) (Reg RAX)]
-                ++ [IMov (Reg RAX) (Const numElement)]
-                ++ [IMov (RegOffset 8 R10) (Reg RAX)]
-                ++ concatMap
-                  ( \(index, ins) ->
-                      ins ++ [IMov (RegOffset (8 * index) R10) (Reg RAX)]
-                  )
-                  (zip [2 ..] vecElements)
-                ++ [IMov (Reg RAX) (Reg R10)]
-                ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
-                ++ [ILabel labelVecMakeEnd]
-       in res
+    EVector exprs -> do
+      env <- get
+      liftIO $ compileAndAllocateHeapStructures env "vec" 2 defs isTailPosition counter si exprs
     EDictGet dictRef key -> do
       (s, typScope, scopeName, typAliasEnv) <- get
       case lookup scopeName typScope of
@@ -829,10 +804,10 @@ exprToInstrs expr si counter isTailPosition defs =
                   return $ case lookup dictRef s of
                     Nothing -> []
                     Just i ->
-                      [ ILabel ";get dict element",
-                        IMov (Reg RAX) (stackloc i),
-                        ISub (Reg RAX) (Const 1), --UNTAGGING
-                        IMov (Reg RAX) (RegOffset (8 * (heapPos + 2)) RAX)
+                      [ ILabel ";get dict element"
+                      , IMov (Reg RAX) (stackloc i)
+                      , ISub (Reg RAX) (Const 1) --UNTAGGING
+                      , IMov (Reg RAX) (RegOffset (8 * (heapPos + 2)) RAX)
                       ]
                 Nothing -> return []
             Just (TName typ) ->
@@ -843,10 +818,10 @@ exprToInstrs expr si counter isTailPosition defs =
                       return $ case lookup dictRef s of
                         Nothing -> []
                         Just i ->
-                          [ ILabel ";get dict element",
-                            IMov (Reg RAX) (stackloc i),
-                            ISub (Reg RAX) (Const 1), --UNTAGGING
-                            IMov (Reg RAX) (RegOffset (8 * (heapPos + 2)) RAX)
+                          [ ILabel ";get dict element"
+                          , IMov (Reg RAX) (stackloc i)
+                          , ISub (Reg RAX) (Const 1) --UNTAGGING
+                          , IMov (Reg RAX) (RegOffset (8 * (heapPos + 2)) RAX)
                           ]
                     Nothing -> return []
                 Just _ -> return []
@@ -861,18 +836,18 @@ exprToInstrs expr si counter isTailPosition defs =
       let a = case lookup vec s of
             Nothing -> []
             Just i ->
-              [ IMov (Reg RAX) (stackloc i),
-                ISub (Reg RAX) (Const 1), --UNTAGGING
-                IMov (Reg R15) (Const item),
-                ICmp (Reg R15) (Const 0),
-                IJl overflowIndex,
-                ICmp (Reg R15) (RegOffset 8 RAX),
-                IJge overflowIndex,
-                IMov (Reg RAX) (RegOffset (8 * (item + 2)) RAX),
-                IJmp endLabel,
-                ILabel overflowIndex,
-                ICall "error_index_out_of_bounds",
-                -- IMov (Reg RAX) (Const 0),
+              [ IMov (Reg RAX) (stackloc i)
+              , ISub (Reg RAX) (Const 1) --UNTAGGING
+              , IMov (Reg R15) (Const item)
+              , ICmp (Reg R15) (Const 0)
+              , IJl overflowIndex
+              , ICmp (Reg R15) (RegOffset 8 RAX)
+              , IJge overflowIndex
+              , IMov (Reg RAX) (RegOffset (8 * (item + 2)) RAX)
+              , IJmp endLabel
+              , ILabel overflowIndex
+              , ICall "error_index_out_of_bounds"
+              , -- IMov (Reg RAX) (Const 0),
                 ILabel endLabel
               ]
        in pure a
@@ -884,23 +859,23 @@ exprToInstrs expr si counter isTailPosition defs =
       let a = case lookup vec s of
             Nothing -> []
             Just i ->
-              [ IMov (Reg RAX) (stackloc i),
-                ISub (Reg RAX) (Const 1), --UNTAGGING
-                IMov (Reg R10) (Const item),
-                ICmp (Reg R10) (Const 0),
-                IJl overflowIndex,
-                ICmp (Reg R10) (RegOffset 0 RAX),
-                IJge overflowIndex
+              [ IMov (Reg RAX) (stackloc i)
+              , ISub (Reg RAX) (Const 1) --UNTAGGING
+              , IMov (Reg R10) (Const item)
+              , ICmp (Reg R10) (Const 0)
+              , IJl overflowIndex
+              , ICmp (Reg R10) (RegOffset 0 RAX)
+              , IJge overflowIndex
               ]
                 ++ exprIO
-                ++ [ IMov (Reg R10) (stackloc i),
-                     ISub (Reg R10) (Const 1), --UNTAGGING
-                     IMov (RegOffset (8 * (item + 2)) R10) (Reg RAX),
-                     IJmp endLabel,
-                     ILabel overflowIndex,
-                     ICall "error_index_out_of_bounds",
-                     IMov (Reg RAX) (Const 0),
-                     ILabel endLabel
+                ++ [ IMov (Reg R10) (stackloc i)
+                   , ISub (Reg R10) (Const 1) --UNTAGGING
+                   , IMov (RegOffset (8 * (item + 2)) R10) (Reg RAX)
+                   , IJmp endLabel
+                   , ILabel overflowIndex
+                   , ICall "error_index_out_of_bounds"
+                   , IMov (Reg RAX) (Const 0)
+                   , ILabel endLabel
                    ]
        in pure a
     EDictSet dictRef key exprDictSet -> do
@@ -921,10 +896,10 @@ exprToInstrs expr si counter isTailPosition defs =
                     Nothing -> []
                     Just i ->
                       exprIO
-                        ++ [ IMov (Reg R10) (stackloc i),
-                             ISub (Reg R10) (Const 1), --UNTAGGING
-                             IMov (RegOffset (8 * (heapPos + 2)) R10) (Reg RAX),
-                             IMov (Reg RAX) (stackloc i)
+                        ++ [ IMov (Reg R10) (stackloc i)
+                           , ISub (Reg R10) (Const 1) --UNTAGGING
+                           , IMov (RegOffset (8 * (heapPos + 2)) R10) (Reg RAX)
+                           , IMov (Reg RAX) (stackloc i)
                            ]
                 Nothing -> return []
             Just (TName typ) -> do
@@ -938,10 +913,10 @@ exprToInstrs expr si counter isTailPosition defs =
                         Nothing -> []
                         Just i ->
                           exprIO
-                            ++ [ IMov (Reg R10) (stackloc i),
-                                 ISub (Reg R10) (Const 1), --UNTAGGING
-                                 IMov (RegOffset (8 * (heapPos + 2)) R10) (Reg RAX),
-                                 IMov (Reg RAX) (stackloc i)
+                            ++ [ IMov (Reg R10) (stackloc i)
+                               , ISub (Reg R10) (Const 1) --UNTAGGING
+                               , IMov (RegOffset (8 * (heapPos + 2)) R10) (Reg RAX)
+                               , IMov (Reg RAX) (stackloc i)
                                ]
                     Nothing -> return []
                 Just _ -> return []
@@ -951,28 +926,7 @@ exprToInstrs expr si counter isTailPosition defs =
         Nothing -> return []
     EDict listExprs -> do
       env <- get
-      let numElements = length listExprs
-      dictElements <- liftIO $ compileLetBody (fmap snd listExprs) si counter env False defs
-      -- typsExps <- liftIO $ mapM (\e -> fmap fst (runStateT (calcTyp e [] []) ("main", []))) (fmap snd listExprs)
-      labelDictMake <- liftIO $ makeLabel ";make_dict" counter
-      return $
-        [ ILabel labelDictMake,
-          IAdd (Reg RCX) (Const 8), -- bumping for using an empty space
-          IMov (Reg R15) (Reg RCX), -- save the starting place
-          IAdd (Reg RCX) (Const (8 * (numElements + 1))) -- save space for the next items
-        ]
-          ++ [IMov (Reg RAX) (Const 3)]
-          ++ [IMov (RegOffset 0 R15) (Reg RAX)]
-          ++ [IMov (Reg RAX) (Const numElements)]
-          ++ [IMov (RegOffset 8 R15) (Reg RAX)]
-          ++ concatMap
-            ( \(index, ins) ->
-                ins
-                  ++ [IMov (RegOffset (8 * index) R15) (Reg RAX)]
-            )
-            (zip [2 ..] dictElements)
-          ++ [IMov (Reg RAX) (Reg R15)]
-          ++ [IAdd (Reg RAX) (Const 1)] -- TAGGING
+      liftIO $ compileAndAllocateHeapStructures env "dict" 3 defs isTailPosition counter si (fmap snd listExprs)
     EApp nameDef listParams -> do
       currentVarEnv <- get
       afterCallLabel <- liftIO $ makeLabel "after_call" counter
@@ -1005,6 +959,55 @@ exprToInstrs expr si counter isTailPosition defs =
 checkStackAligment :: Int -> Int
 checkStackAligment si =
   if si * 8 `mod` 16 == 0 then si else checkStackAligment (si + 1)
+
+compileAndAllocateHeapStructures ::
+  CompilerEnv ->
+  String ->
+  Int ->
+  [Def] ->
+  Bool ->
+  Counter ->
+  StackIndex ->
+  [Expr] ->
+  IO [Instruction]
+compileAndAllocateHeapStructures env label heapTyp defs isTailPosition counter si exprs = do
+  labelVecMake <- liftIO $ makeLabel (";make_" ++ label) counter
+  labelVecMakeEnd <- liftIO $ makeLabel (";end_make_" ++ label) counter
+  evalAndSaveExprs <-
+    liftIO $
+      fmap
+        (concat . reverse)
+        ( foldM
+            ( \acc (index, expVec) -> do
+                ins <-
+                  evalStateT
+                    (exprToInstrs expVec (si + index) counter isTailPosition defs)
+                    env
+                pure $ (ins ++ [IMov (stackloc (si + index)) (Reg RAX)]) : acc
+            )
+            (pure [])
+            (zip [0 ..] (reverse exprs))
+        )
+  let numElement = length exprs
+      allocateElements =
+        foldl
+          (\acc index -> [IMov (Reg RAX) (stackloc (si + index)), IMov (RegOffset (8 * (2 + index)) RCX) (Reg RAX)] ++ acc)
+          []
+          [(length exprs - 1), (length exprs - 2) .. 0]
+  pure $
+    evalAndSaveExprs
+      ++ [ ILabel labelVecMake
+         , IMov (Reg RAX) (Const heapTyp)
+         , IMov (RegOffset 0 RCX) (Reg RAX)
+         , IMov (Reg RAX) (Const numElement)
+         , IMov (RegOffset 8 RCX) (Reg RAX)
+         ]
+      ++ allocateElements
+      ++ [ IMov (Reg RAX) (Reg RCX)
+         , IAdd (Reg RAX) (Const 1) -- TAGGING
+         , IAdd (Reg RCX) (Const (8 * (numElement + 2))) -- + 2 because of the typ and num elem words
+         , ILabel labelVecMakeEnd
+         ]
 
 compileLetBody :: [Expr] -> StackIndex -> Counter -> CompilerEnv -> Bool -> [Def] -> IO [[Instruction]]
 compileLetBody exprs si counter env isTailPosition defs =
