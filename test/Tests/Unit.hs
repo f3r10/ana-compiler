@@ -196,7 +196,7 @@ spec = do
        in result `shouldThrow` (== AnaCompilerException ["Type mismatch: if branches must agree on type"])
     it "print input" $ do
       a <- test_file "print_input_test" "print.ana" ["5"]
-      shouldBe a "5"
+      shouldBe a "5\n0"
     it "fibbonaci function" $ do
       a <- test_file "fibbonaci_function_test" "fib.ana" ["15"]
       shouldBe a "610"
@@ -206,6 +206,40 @@ spec = do
     it "sum-tail-recursive" $ do
       a <- test_file "sum-tail-recursive" "sum-tail-recursive.ana" ["400"]
       shouldBe a "80201"
+    it "binary_search_tree" $ do
+      a <- test_file "binary_search_tree" "binary_search_tree.ana" ["0"]
+      shouldBe a 
+        "dict {_0: 20,_1: dict {_0: 5,_1: dict {_0: 1,_1: null,_2: null},_2: dict {_0: 15,_1: null,_2: dict {_0: 16,_1: null,_2: null}}},_2: dict {_0: 30,_1: null,_2: null}}\n\
+        \dict {_0: 15,_1: null,_2: dict {_0: 16,_1: null,_2: null}}"
+    it "linked_list" $ do
+      a <- test_file "linked_list" "linked_list.ana" ["0"]
+      shouldBe a 
+        "dict {_0: 2,_1: dict {_0: 100,_1: dict {_0: 5,_1: dict {_0: 10,_1: dict {_0: 1,_1: dict {_0: 0,_1: dict {_0: 20,_1: dict {_0: 1000,_1: null}}}}}}}}\n\
+        \1000\n\
+        \null"
+    it "points" $ do
+      a <- test_file "points" "points.ana" ["0"]
+      shouldBe a "(vec 4,6)"
+    it "nested_vec" $ do
+      a <- test_file "nested_vec" "nested_vec.ana" ["0"]
+      shouldBe a "(vec 10,(vec 20,30,40),(vec 1,2,3,4))"
+    it "tuple" $ do
+      a <- test_file "tuple" "tuple.ana" ["0"]
+      shouldBe a "(cons 100,(cons 10,(cons 2,(cons 5,(cons 6,null)))))\n\
+      \(cons 2,(cons 5,(cons 6,null)))\n\
+      \10\n\
+      \(cons 10,(cons 2,(cons 5,(cons 6,null))))"
+    it "tuple_error_type" $
+      let a  = test_file "tuple_error" "tuple_error.ana" ["0"]
+          res = a `shouldThrow` (== AnaCompilerException ["Type mismatch: op must take a number as an argument"])
+      in res
+    it "vec_outofbounds" $ do
+      a <- test_file "outofbounds" "vec_error_outofbounds.ana" ["0"]
+      shouldBe a "Error: index out of bounds"
+    it "vec_error_type" $
+      let a  = test_file "vec_error_type" "vec_error_type.ana" ["0"]
+          res = a `shouldThrow` (== AnaCompilerException ["Type mismatch:: params type is not the same as argument type [TypValidated (TVec TNum),TypValidated (TVec TNum)] [(\"p1\",TVec TNum),(\"p2\",TName \"Point\")]"])
+      in res
     it "property" $
       property $
         \() -> () === ()
