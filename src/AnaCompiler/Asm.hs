@@ -29,6 +29,7 @@ data Size
 
 data Arg
   = Const Int
+  | HexConst Int
   | Reg Reg
   | RegOffset Int Reg
   | Size Size Arg
@@ -79,6 +80,7 @@ argToAsm :: Arg -> String
 argToAsm arg =
   case arg of
     Const n -> show n
+    HexConst n -> printf "%#Lx" n
     Reg r -> rToAsm r
     RegOffset n reg -> 
       if n > 0 then

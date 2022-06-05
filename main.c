@@ -21,9 +21,9 @@ int64_t isPointer(int64_t p) { return (p & 0x00000007) == 0x00000001; }
 typedef struct {
   int64_t typ;
   int64_t size;
-  int64_t first;
-  int64_t second;
-} Tuple;
+  char *name;
+  int64_t elements[];
+} Data;
 
 void print(int64_t val, int printSpace) {
   if (val & 0x00000001 ^ 0x00000001) {
@@ -56,58 +56,50 @@ void print(int64_t val, int printSpace) {
       printf("null");
     }
   } else if (isPointer(val)) {
-    /*
-      Tuple -> [type:1, val, pointer] -> [type, val, pointer]
-      Vec -> [type:2, num_elements, elem_1, elem_2, ..... elem_n]
-      Dict -> [type:3, numElements, elem_1, elem_2, ..... elem_n]
-    */
     int64_t* valp = (int64_t *)(val - 1); // extract address
-    Tuple* d = (Tuple*) valp;
+    Data* d = (Data*) valp;
     int64_t *structureType = &(d->typ);
+    int64_t *numElements = &(d->size);
+    char *name = (d->name);
     if (*structureType == 1) { // This is a tuple
-      printf("(");
-      print(*(valp + 1), 0); // print recursive first element
-      printf(",");
-      print(*(valp + 2), 0); // print recursive second element
-      if (printSpace == 1) {
-        printf(")\n");
-      } else {
-        printf(")");
-      }
+      printf("(%s ", name);
     } else if (*structureType == 2) { // This is a vector
-      int64_t *numElements = &(d->size);
-      printf("(");
-      int i;
-      for (i = 1; i <= *numElements; i = i + 1) {
-        if (i != 1) {
-          printf(",");
-        }
-        print(*(valp + 1 + i), 0); // print recursive second element
-        // printf("%ld", *(valp + 1 + i) >> 1);
+      printf("(%s ", name);
+    } else if (*structureType == 3) { // This is a Dict
+      printf("%s {", name);
+    } else {
+      printf("Unknown structure: %ld\n", *structureType);
+    }
+    int i;
+    for(int i = 0; i < d->size; i += 1) {
+      if (i != 0) {
+        printf(",");
       }
-      if (printSpace == 1) {
-        printf(")\n");
-      } else {
-        printf(")");
-      }
-    } else if (*structureType == 3) {
-      int64_t *numElements = &(d->size);
-      printf("{");
-      int i;
-      for (i = 1; i <= *numElements; i = i + 1) {
-        if (i != 1) {
-          printf(", ");
-        }
+      if (*structureType == 3) {
         printf("_%i: ", i);
-        print(*(valp + 1 + i), 0);
       }
-      if (printSpace == 1) {
+      print(d->elements[i], 0); // print recursive second element
+    }
+    if (printSpace == 1) {
+      if (*structureType == 1) { // This is a tuple
+        printf(")\n");
+      } else if (*structureType == 2) { // This is a vector
+        printf(")\n");
+      } else if (*structureType == 3) { // This is a Dict
         printf("}\n");
       } else {
-        printf("}");
+        printf("Unknown structure: %ld\n", *structureType);
       }
     } else {
-      printf("Unknown structure: %ldd\n", structureType);
+      if (*structureType == 1) { // This is a tuple
+        printf(")");
+      } else if (*structureType == 2) { // This is a vector
+        printf(")");
+      } else if (*structureType == 3) { // This is a Dict
+        printf("}");
+      } else {
+        printf("Unknown structure: %ld\n", *structureType);
+      }
     }
 
   } else {
@@ -133,7 +125,7 @@ void error_index_out_of_bounds() {
 void print_heap(int64_t *where, uint64_t how_many) {
   uint64_t i = 0;
   while (i < how_many) {
-    printf("%p:\t%#010llx\t%lld\n", where, *where, *where);
+    printf("%p:\t%#010llx\t%ld\n", where, *where, *where);
     i += 1;
     where += 1;
   }
@@ -142,10 +134,9 @@ void print_heap(int64_t *where, uint64_t how_many) {
 int main(int argc, char **argv) {
   // int64_t result = our_code_starts_here();
   // printf("\nThe rep was: %lld", result);
-  int64_t input_val;
-  if (argc < 2) {
-    input_val = FALSE;
-  } else {
+  int64_t input_val = FALSE;
+  int64_t dump_heap = 0;
+  if (argc > 1) {
     char *endptr;
     long v = strtoll(argv[1], &endptr, 0);
     if (*endptr != '\0') {
@@ -163,12 +154,21 @@ int main(int argc, char **argv) {
       input_val = (input_val << 1);
     }
   }
+  if (argc > 2) {
+    // Read dump heap argument
+    const char* arg = (char*) argv[2];
 
+    if (strcmp(arg, "dump") == 0) {
+      dump_heap = 1;
+    }
+  }
   int64_t *HEAP = malloc(8 * 100000);
   int64_t result = our_code_starts_here(input_val, HEAP);
   print(result, 1);
   printf("\n");
-  print_heap(HEAP, 40);
+  if (dump_heap) {
+    print_heap(HEAP, 40);
+  }
   free(HEAP);
   return 0;
 }
