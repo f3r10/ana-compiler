@@ -20,7 +20,7 @@ type Program = String
 
 test_file :: String -> String -> [String] -> IO T.Text
 test_file testName fileName args = do 
-  content <- readFile ("input/" ++ fileName)
+  content <- readFile ("programs/" ++ fileName)
   test_run content testName args
 
 
@@ -28,9 +28,9 @@ test_run :: Program -> String -> [String] -> IO T.Text
 test_run program name args =
   let prog = Parser.parseProgram $ Parser.stringToSexp (T.unpack (T.strip . T.pack $ program))
       result = compile prog
-      name_s = printf "output/%s.s" name
-      name_o = printf "output/%s.o" name
-      name_run = printf "output/%s.run" name
+      name_s = printf "compiled/%s.s" name
+      name_o = printf "compiled/%s.o" name
+      name_run = printf "compiled/%s.run" name
       writeResult = result >>= writeFile name_s
       nasm_cmd = readProcess "nasm" ["-f elf64", "-o " ++ name_o, name_s] []
       clang_cmd = callCommand ("clang " ++ "-o " ++ name_run ++ " main.c " ++ name_o)

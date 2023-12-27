@@ -10,7 +10,7 @@ Icon*
 *.cmo
 *.run
 *.swp
-compile
+ana-compiler
 .DS_Store
 _site/
 *.aux

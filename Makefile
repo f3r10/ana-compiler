@@ -1,16 +1,14 @@
-main: src/*
-	./build
-
-output/%.run: output/%.o main.c
+compiled/%.run: compiled/%.o main.c
 	clang -o $@ -g -fsanitize=address main.c $<
 
-output/%.o: output/%.s
+compiled/%.o: compiled/%.s
 	nasm -f elf64 -o $@ $<
 
-output/%.s: input/%.ana main
-	mkdir -p output
-	bin/compile $< > $@
+compiled/%.s: programs/%.ana
+	cabal v2-install --install-method=copy --installdir=. --overwrite-policy=always
+	mkdir -p compiled
+	./ana-compiler $< > $@
 
 clean:
-	rm -rf output/*.o output/*.s output/*.dSYM output/*.run *.log
+	rm -rf compiled/*.o compiled/*.s compiled/*.dSYM compiled/*.run *.log
 

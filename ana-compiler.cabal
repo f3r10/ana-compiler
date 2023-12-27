@@ -43,10 +43,10 @@ library
         , text
     hs-source-dirs:   src
 
-executable compile
+executable ana-compiler
     import: common-settings
     main-is:          Main.hs
-    build-depends:    base ^>=4.14.3.0
+    build-depends:    base ^>=4.17.2.1
                     -- , sexpresso
                     , parsec
                     , ana-compiler
